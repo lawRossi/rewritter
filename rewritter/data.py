@@ -2,6 +2,8 @@ from torch.utils.data import Dataset
 from collections import defaultdict
 from itertools import chain
 import numpy as np
+import jieba
+import re
 
 
 class RewritterDataset(Dataset):
@@ -107,6 +109,20 @@ class RewritterDataset(Dataset):
         self.data = converted_data
 
 
+p = re.compile("[a-zA-Z0-9]+")
+
+
+def tokenize(utterance):
+    tokens = jieba.lcut(utterance)
+    flat_tokens = []
+    for token in tokens:
+        if p.match(token):
+            flat_tokens.append(token)
+        else:
+            flat_tokens.extend(token)
+    return flat_tokens
+
+
 
 if __name__ == "__main__":
     data = RewritterDataset("data/corpus.txt", lambda x: list(x))
@@ -116,9 +132,9 @@ if __name__ == "__main__":
         s2 = data[i][-2].sum()
         if s1 != s2:
             print(s1, s2)
-    # for i in range(len(data)):
-    #     src, tgt = data[i][0], data[i][1]
-    #     if 3619 in src or 3619 in tgt:
-    #         print(src)
-    #         print(tgt)
-    #         break
+    for i in range(len(data)):
+        src, tgt = data[i][0], data[i][1]
+        if 3619 in src or 3619 in tgt:
+            print(src)
+            print(tgt)
+            break

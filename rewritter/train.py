@@ -1,12 +1,12 @@
 from torch.utils.data import DataLoader
 from torch.nn import CrossEntropyLoss
 from .model import ReWritterModel
-from .data import RewritterDataset
+from .data import RewritterDataset, tokenize
 from torch.optim import Adam
 
 
 def train():
-    data = RewritterDataset("data/corpus.txt", lambda x: list(x))
+    data = RewritterDataset("data/corpus.txt", tokenize)
     data_loader = DataLoader(data, batch_size=4, shuffle=True)
     loss_func = CrossEntropyLoss(ignore_index=-1)
     model = ReWritterModel(len(data.vocab)+1 , 50, 5, 2, data.max_src_len)
