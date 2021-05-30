@@ -217,10 +217,10 @@ class ReWritterModel(nn.Module):
         tgt_mask = (tgt_seqs != 0).unsqueeze(1)
         size = tgt_seqs.size(1) # get seq_len for matrix
         nopeak_mask = np.triu(np.ones((1, size, size)), k=1).astype('uint8')
-        nopeak_mask = Variable(torch.from_numpy(nopeak_mask) == 0)
+        nopeak_mask = Variable(torch.from_numpy(nopeak_mask, device=src_seqs.device) == 0)
         tgt_mask = tgt_mask & nopeak_mask
         return src_mask, tgt_mask
-    
+
     def encode(self, src_seqs, src_turns):
         src_mask = (src_seqs != 0).unsqueeze(1)
         src = self.embedding(src_seqs, src_turns)
@@ -233,7 +233,7 @@ class ReWritterModel(nn.Module):
         tgt_mask = (tgt_seqs != 0).unsqueeze(1)
         size = tgt_seqs.size(1) # get seq_len for matrix
         nopeak_mask = np.triu(np.ones((1, size, size)), k=1).astype('uint8')
-        nopeak_mask = Variable(torch.from_numpy(nopeak_mask) == 0)
+        nopeak_mask = Variable(torch.from_numpy(nopeak_mask, device=src.device) == 0)
         tgt_mask = tgt_mask & nopeak_mask
         for decoder in self.transformer.decoders:
             tgt = decoder(tgt, src, src, src_mask, tgt_mask)
