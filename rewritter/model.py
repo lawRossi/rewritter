@@ -89,10 +89,13 @@ class MultiHeadAttention(nn.Module):
 
 
 class FeedForward(nn.Module):
-    def __init__(self, d_model, d_ff=2048, dropout=0.1):
+    def __init__(self, d_model, d_ff=2048, dropout=0.1, decoder=False):
         super().__init__() 
         # We set d_ff as a default to 2048
-        self.linear_1 = nn.Linear(d_model, d_ff)
+        if not decoder:
+            self.linear_1 = nn.Linear(d_model, d_ff)
+        else:
+            self.linear_1 = nn.Linear(2*d_model, d_ff)
         self.dropout = nn.Dropout(dropout)
         self.linear_2 = nn.Linear(d_ff, d_model)
 
@@ -140,19 +143,26 @@ class DecoderLayer(nn.Module):
         self.norm1 = LayerNorm(d_model)
         self.norm2 = LayerNorm(d_model)
         self.norm3 = LayerNorm(d_model)
+        self.norm4 = LayerNorm(d_model)
         self.mha1 = MultiHeadAttention(d_model, heads, dropout)
-        self.mha2 = MultiHeadAttention(d_model, heads, dropout)
-        self.ff = FeedForward(d_model, dropout=dropout)
+        self.mha_h = MultiHeadAttention(d_model, heads, dropout)
+        self.mha_u = MultiHeadAttention(d_model, heads, dropout)
+        self.ff = FeedForward(d_model, dropout=dropout, decoder=True)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, k, v, src_mask, tgt_mask):
+    def forward(self, x, k, v, src_mask, tgt_mask, segment_type):
         x_ = self.norm1(x)
-        x = x_ + self.dropout(self.mha1(x_, x_, x_, tgt_mask))
+        m = x_ + self.dropout(self.mha1(x_, x_, x_, tgt_mask))
         q = self.norm2(x)
-        x = x + self.dropout(self.mha2(q, k, v, src_mask))
-        x_ = self.norm3(x)
-        output = x + self.dropout(self.ff(x_))
-        return output
+        mask_h = src_mask & (segment_type == 0).unsqueeze(1)
+        c_h = m + self.dropout(self.mha_h(q, k, v, mask_h))
+        c_h = self.norm3(c_h)
+        mask_u = src_mask & (segment_type == 1).unsqueeze(1)
+        c_u = m + self.dropout(self.mha_u(q, k, v, mask_u))
+        c_u = self.norm4(c_u)
+        c = torch.cat([c_h, c_u], dim=2)
+        d = self.ff(c)
+        return d, c_h, c_u
 
 
 class Transformer(nn.Module):
@@ -161,12 +171,12 @@ class Transformer(nn.Module):
         self.encoders = nn.ModuleList([EncoderLayer(d_model, heads, dropout) for _ in range(layers)])
         self.decoders = nn.ModuleList([DecoderLayer(d_model, heads, dropout) for _ in range(layers)])
     
-    def forward(self, src, tgt, src_mask, tgt_mask):
+    def forward(self, src, tgt, src_mask, tgt_mask, segment_type):
         for encoder in self.encoders:
             src = encoder(src, src_mask)
         for decoder in self.decoders:
-            tgt = decoder(tgt, src, src, src_mask, tgt_mask)
-        return src, tgt
+            tgt, c_h, c_u = decoder(tgt, src, src, src_mask, tgt_mask, segment_type)
+        return src, tgt, c_h, c_u
 
 
 class ReWritterModel(nn.Module):
@@ -175,6 +185,8 @@ class ReWritterModel(nn.Module):
         self.embedding = Embedding(vocab_size, emb_dims, max_seq_len)
         self.transformer = Transformer(emb_dims, heads, layers, dropout)
         self.w_d = nn.Parameter(torch.randn((emb_dims, 1)))
+        self.w_h = nn.Parameter(torch.randn((emb_dims, 1)))
+        self.w_u = nn.Parameter(torch.randn((emb_dims, 1)))
 
     def forward(self, src_seqs, tgt_seqs, src_turns, tgt_turns, segment_type, transform_matrix):
         """[summary]
@@ -191,25 +203,26 @@ class ReWritterModel(nn.Module):
         src = self.embedding(src_seqs, src_turns)
         tgt = self.embedding(tgt_seqs, tgt_turns)
         src_mask, tgt_mask = self._compute_mask(src_seqs, tgt_seqs)
-        encoder_output, decoder_output = self.transformer(src, tgt, src_mask, tgt_mask)
-        ratio = torch.sigmoid(torch.matmul(decoder_output, self.w_d)) # B X T x 1
-        scores = self._compute_scores(encoder_output, decoder_output, segment_type)
+        src, tgt, c_h, c_u = self.transformer(src, tgt, src_mask, tgt_mask, segment_type)
+        ratio = torch.sigmoid(torch.matmul(tgt, self.w_d) + torch.matmul(c_h, self.w_h) + torch.matmul(c_u, self.w_u)) # B X T x 1
+        # ratio = torch.sigmoid(torch.matmul(tgt, self.w_d))
+        scores = self._compute_scores(src, tgt, src_mask, segment_type)
         segment_type = segment_type.unsqueeze(1)  # B x 1 x S
         flag_h = (segment_type == 0) * 1.0
         flag_u = (segment_type == 1) * 1.0
         ratio = torch.bmm(ratio, flag_h) + torch.bmm((1 - ratio), flag_u)
-        scores = ratio * scores
-        logits = torch.bmm(scores, transform_matrix)
+        logits = ratio * scores
+        logits = torch.bmm(logits, transform_matrix)
         return logits
 
-    def _compute_scores(self, encoder_output, decoder_output, segment_type):
-        scores = torch.bmm(decoder_output, encoder_output.permute(0, 2, 1)) # B x T x S
+    def _compute_scores(self, src, tgt, src_mask, segment_type):
+        scores = torch.bmm(tgt, src.permute(0, 2, 1)) # B x T x S
         # segment_type = segment_type.unsqueeze(1)
-        # scores1 = scores.masked_fill(segment_type == 0, -1e9)
-        # scores2 = scores.masked_fill(segment_type == 1, -1e9)
+        # scores1 = scores.masked_fill(~src_mask | (segment_type == 0), -1e9)
+        # scores2 = scores.masked_fill(~src_mask | (segment_type == 1), -1e9)
         # scores1 = torch.softmax(scores1, dim=-1)
         # scores2 = torch.softmax(scores2, dim=-1)
-        #scores = scores1 + scores2
+        # scores = scores1 + scores2
         return scores
 
     def _compute_mask(self, src_seqs, tgt_seqs):
@@ -236,15 +249,15 @@ class ReWritterModel(nn.Module):
         nopeak_mask = Variable(torch.from_numpy(nopeak_mask) == 0).to(src.device)
         tgt_mask = tgt_mask & nopeak_mask
         for decoder in self.transformer.decoders:
-            tgt = decoder(tgt, src, src, src_mask, tgt_mask)
-        ratio = torch.sigmoid(torch.matmul(tgt, self.w_d)) # B X T x 1
-        scores = self._compute_scores(src, tgt, segment_type)
+            tgt, c_h, c_u = decoder(tgt, src, src, src_mask, tgt_mask, segment_type)
+        ratio = torch.sigmoid(torch.matmul(tgt, self.w_d) + torch.matmul(c_h, self.w_h) + torch.matmul(c_u, self.w_u)) # B X T x 1
+        scores = self._compute_scores(src, tgt, src_mask,segment_type)
         segment_type = segment_type.unsqueeze(1)  # B x 1 x S
         flag_h = (segment_type == 0) * 1.0
         flag_u = (segment_type == 1) * 1.0
         ratio = torch.bmm(ratio, flag_h) + torch.bmm((1 - ratio), flag_u)
         scores = ratio * scores
-        logits = torch.bmm(scores, transform_matrix)
+        logits = torch.bmm(scores, transform_matrix.permute(0, 2, 1))
         # mask = abs(logits) < 1e-8
         # logits = logits.masked_fill(mask, -1e5)
         logp = torch.log_softmax(logits, dim=-1)
@@ -263,4 +276,5 @@ if __name__ == "__main__":
 
     output = model(src, tgt, src_turns, tgt_turns, segment_type, transform_matrix)
     print(output)
-    print(torch.topk(output, 2))
+    print(output.sum(-1))
+    # print(torch.topk(output, 2))

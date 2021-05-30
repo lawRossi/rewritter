@@ -79,7 +79,6 @@ class BeamSearchDecoder:
             top_logps, top_idxes = torch.topk(logps, self.beam_size)
             top_logps = top_logps.cpu().detach().numpy()
             top_idxes = top_idxes.cpu().detach().numpy()
-            print(top_logps, top_idxes)
             for logp, idx in zip(top_logps, top_idxes):
                 new_node = copy.deepcopy(node)
                 new_node.append(idx, logp)
