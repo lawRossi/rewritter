@@ -257,7 +257,7 @@ class ReWritterModel(nn.Module):
         flag_u = (segment_type == 1) * 1.0
         ratio = torch.bmm(ratio, flag_h) + torch.bmm((1 - ratio), flag_u)
         scores = ratio * scores
-        logits = torch.bmm(scores, transform_matrix.permute(0, 2, 1))
+        logits = torch.bmm(scores, transform_matrix)
         # mask = abs(logits) < 1e-8
         # logits = logits.masked_fill(mask, -1e5)
         logp = torch.log_softmax(logits, dim=-1)
