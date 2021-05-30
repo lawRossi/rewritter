@@ -40,7 +40,7 @@ class BeamSearchNode:
         self.score = self.logp / (len(self.token_idxes) - 1 + 1e-6)
 
     def is_endnode(self):
-        return self.tokens[-1] == "<EOS>"
+        return self.tokens[-1] == "<EOS>" or len(self.tokens) == self.max_len
 
     def get_utterance(self):
         return "".join([token for token in self.tokens if token not in ["<SOS>", "<EOS>", "<UNK>"]])

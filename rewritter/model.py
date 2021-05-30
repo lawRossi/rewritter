@@ -33,6 +33,8 @@ class Embedding(nn.Module):
     def __init__(self, vocab_size, emb_dims, max_seq_len=100):
         super().__init__()
         self.token_embedding = nn.Embedding(vocab_size, emb_dims, padding_idx=0)
+        init_range = 0.5 / emb_dims
+        self.token_embedding.weight.data.uniform_(-init_range, init_range)
         self.position_embedding = PositionalEmbedding(emb_dims, max_seq_len)
         self.turn_embedding = nn.Embedding(4, emb_dims)
 
@@ -172,7 +174,7 @@ class ReWritterModel(nn.Module):
         super().__init__()
         self.embedding = Embedding(vocab_size, emb_dims, max_seq_len)
         self.transformer = Transformer(emb_dims, heads, layers, dropout)
-        self.w_d = nn.Parameter(torch.rand((emb_dims, 1), dtype=torch.float))
+        self.w_d = nn.Parameter(torch.randn((emb_dims, 1)))
 
     def forward(self, src_seqs, tgt_seqs, src_turns, tgt_turns, segment_type, transform_matrix):
         """[summary]
