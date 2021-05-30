@@ -1,7 +1,7 @@
 from torch.utils.data import DataLoader
 from torch.nn import CrossEntropyLoss
-from model import ReWritterModel
-from data import RewritterDataset
+from .model import ReWritterModel
+from .data import RewritterDataset
 from torch.optim import Adam
 
 

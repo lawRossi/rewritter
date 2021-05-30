@@ -3,7 +3,6 @@ import torch.nn as nn
 from torch.autograd import Variable
 import math
 import numpy as np
-from queue import PriorityQueue
 
 
 class PositionalEmbedding(nn.Module):
@@ -199,6 +198,8 @@ class ReWritterModel(nn.Module):
         ratio = torch.bmm(ratio, flag_h) + torch.bmm((1 - ratio), flag_u)
         scores = ratio * scores
         logits = torch.bmm(scores, transform_matrix)
+        mask = abs(logits) < 1e-8
+        logits = logits.masked_fill(mask, -1e-9)
         return logits
 
     def _compute_scores(self, encoder_output, decoder_output, segment_type):

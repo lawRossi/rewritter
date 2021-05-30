@@ -1,9 +1,6 @@
 from itertools import chain
 import torch
 import copy
-from data import RewritterDataset
-from model import ReWritterModel
-import numpy as np
 import heapq
 
 
@@ -142,10 +139,3 @@ class BeamSearchDecoder:
                     src_seq[idx] = -1
                     idx = src_seq.index(word) if word in src_seq else -1
         return torch.tensor([matrix], dtype=torch.float, device=self.device)
-
-
-if __name__ == "__main__":
-    data = RewritterDataset("data/corpus.txt", lambda x: list(x))
-    model = ReWritterModel(len(data.vocab)+1 , 50, 5, 2, data.max_src_len)
-    decoder = BeamSearchDecoder(model, lambda x: list(x), 2, data.vocab, 100, 20)
-    print(decoder.inference(["你喜欢梅西吗？", "喜欢"], "为什么"))
