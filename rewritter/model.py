@@ -150,15 +150,15 @@ class DecoderLayer(nn.Module):
         self.ff = FeedForward(d_model, dropout=dropout, decoder=True)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x, k, v, src_mask, tgt_mask, segment_type):
-        x_ = self.norm1(x)
-        m = x_ + self.dropout(self.mha1(x_, x_, x_, tgt_mask))
-        q = self.norm2(x)
+    def forward(self, q, k, v, src_mask, tgt_mask, segment_type):
+        q = self.norm1(q)
+        m = q + self.dropout(self.mha1(q, q, q, tgt_mask))
+        m = self.norm2(m)
         mask_h = src_mask & (segment_type == 0).unsqueeze(1)
-        c_h = m + self.dropout(self.mha_h(q, k, v, mask_h))
+        c_h = m + self.dropout(self.mha_h(m, k, v, mask_h))
         c_h = self.norm3(c_h)
         mask_u = src_mask & (segment_type == 1).unsqueeze(1)
-        c_u = m + self.dropout(self.mha_u(q, k, v, mask_u))
+        c_u = m + self.dropout(self.mha_u(m, k, v, mask_u))
         c_u = self.norm4(c_u)
         c = torch.cat([c_h, c_u], dim=2)
         d = self.ff(c)
