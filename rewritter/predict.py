@@ -1,4 +1,5 @@
 from itertools import chain
+from math import log
 import torch
 import copy
 import heapq
@@ -8,6 +9,9 @@ class PriorityQueue:
     def __init__(self):
         self._queue = []
         self._index = 0
+    
+    def __len__(self):
+        return len(self._queue)
 
     def push(self, priority, item):
         heapq.heappush(self._queue, (-priority, self._index, item))
@@ -18,7 +22,11 @@ class PriorityQueue:
 
     def empty(self):
         return len(self._queue) == 0
-  
+    
+    def clear(self):
+        self._queue.clear()
+        self._index = 0
+
 
 class BeamSearchNode:
     def __init__(self, vocab, words, max_len):
@@ -59,32 +67,52 @@ class BeamSearchDecoder:
 
     def inference(self, history_utterances, current_utterance):
         src_seqs, src_turns, segment_type, transform_matrix, words = self._convert_src_input(history_utterances, current_utterance)
-        src = self.model.encode(src_seqs, src_turns)
+        src = self.model.encode(src_seqs, src_turns)  # 1 * s * e
         src_mask = (src_seqs != 0).unsqueeze(1)
         nodes = PriorityQueue()
         nodes.push(0, BeamSearchNode(self.vocab, words, self.max_len))
-        num_endnodes = 0
         endnodes = []
         while not nodes.empty():
+            selected_nodes = self._select_nodes(nodes, endnodes)
+            if len(endnodes) == self.beam_size or not selected_nodes:
+                break
+            nodes.clear()
+            src_ = src.repeat(len(selected_nodes), 1, 1) # beam_size * s * e
+            src_mask_ = src_mask.repeat(len(selected_nodes), 1, 1)
+            segment_type_ = segment_type.repeat(len(selected_nodes), 1)
+            transform_matrix_ = transform_matrix.repeat(len(selected_nodes), 1, 1)
+        
+            tgt_seqs, tgt_turns = self._convert_tgt_input(selected_nodes)
+            logps = self.model.decode(src_, src_mask_, tgt_seqs, tgt_turns, segment_type_, transform_matrix_)
+            self._select_topk(nodes, selected_nodes, logps)
+
+        utterances_with_socres = [(node.get_utterance(), node.score) for node in endnodes]
+        return utterances_with_socres
+    
+    def _select_nodes(self, nodes, endnodes):
+        selected_nodes = []
+        while len(selected_nodes) < self.beam_size and not nodes.empty():
             node = nodes.pop()
             if node.is_endnode():
                 endnodes.append(node)
-                num_endnodes += 1
-                if num_endnodes == self.beam_size:
+                if len(endnodes) == self.beam_size:
                     break
                 continue
-            tgt_seqs, tgt_turns = self._convert_tgt_input(node.token_idxes)
-            logps = self.model.decode(src, src_mask, tgt_seqs, tgt_turns, segment_type, transform_matrix)
-            logps = logps[0][-1]
-            top_logps, top_idxes = torch.topk(logps, self.beam_size)
-            top_logps = top_logps.cpu().detach().numpy()
-            top_idxes = top_idxes.cpu().detach().numpy()
-            for logp, idx in zip(top_logps, top_idxes):
+            selected_nodes.append(node)
+        return selected_nodes
+
+    def _select_topk(self, nodes, selected_nodes, logps):
+        logps = logps[:,-1]
+        top_logps, top_idxes = torch.topk(logps, self.beam_size)
+        top_logps = top_logps.cpu().detach().numpy()
+        top_idxes = top_idxes.cpu().detach().numpy()
+
+        for i in range(len(selected_nodes)):
+            node = selected_nodes[i]
+            for logp, idx in zip(top_logps[i], top_idxes[i]): 
                 new_node = copy.deepcopy(node)
                 new_node.append(idx, logp)
                 nodes.push(new_node.score, new_node)
-        utterances_with_socres = [(node.get_utterance(), node.score) for node in endnodes]
-        return utterances_with_socres
 
     def _convert_src_input(self, history_utterances, current_utterance):
         history_tokens = [self.tokenize(utterance) for utterance in history_utterances]
@@ -114,10 +142,11 @@ class BeamSearchDecoder:
         segment_type = torch.tensor([segment_type], dtype=torch.long, device=self.device)
         return src_seqs, src_turns, segment_type, transform_matrix, words
     
-    def _convert_tgt_input(self, token_idxes):
-        tgt_seqs = torch.tensor([token_idxes], dtype=torch.long, device=self.device)
-        tgt_turns = [self.history_size+1] * len(token_idxes)
-        tgt_turns = torch.tensor([tgt_turns], dtype=torch.long, device=self.device)
+    def _convert_tgt_input(self, selected_nodes):
+        token_idxes = [node.token_idxes for node in selected_nodes]
+        tgt_seqs = torch.tensor(token_idxes, dtype=torch.long, device=self.device)
+        tgt_turns = [[self.history_size+1] * len(token_idxes[0]) for _ in range(len(selected_nodes))]
+        tgt_turns = torch.tensor(tgt_turns, dtype=torch.long, device=self.device)
         return tgt_seqs, tgt_turns
     
     def _get_distinct_words(self, src_seq):
