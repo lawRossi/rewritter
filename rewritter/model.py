@@ -36,14 +36,14 @@ class Embedding(nn.Module):
         init_range = 0.5 / emb_dims
         self.token_embedding.weight.data.uniform_(-init_range, init_range)
         self.turn_embedding = nn.Embedding(4, emb_dims)
-        self.turn_embedding.weight.data.uniform_(-init_range, 0.5/init_range)
+        # self.turn_embedding.weight.data.uniform_(-init_range, 0.5/init_range)
         self.position_embedding = PositionalEmbedding(emb_dims, max_seq_len)
 
     def forward(self, x, turns):
         e1 = self.token_embedding(x)
+        e1 = self.position_embedding(e1)
         e2 = self.turn_embedding(turns)
         e = e1 + e2
-        e = self.position_embedding(e)
         return e
 
 
