@@ -29,29 +29,24 @@ class PriorityQueue:
 
 
 class BeamSearchNode:
-    def __init__(self, vocab, words, max_len):
-        self.inv_vocab = {v: k for k, v in vocab.items()}
-        self.token_idxes = [vocab["<SOS>"]]
-        self.words = words
-        self.tokens = ["<SOS>"]
+    def __init__(self, sos_idx, eos_idx, max_len):
+        self.token_idxes = [sos_idx]
+        self.eos_idx = eos_idx
         self.logp = 0
         self.score = 0
         self.max_len = max_len
 
-    def append(self, label_idx, logp):
-        if self.tokens[-1] == "<EOS>" or len(self.tokens) == self.max_len:
-            return
-        token_idx = self.words[label_idx]
+    def append(self, token_idx, logp):
         self.token_idxes.append(token_idx)
-        self.tokens.append(self.inv_vocab.get(self.words[label_idx]))
         self.logp += logp
         self.score = self.logp / (len(self.token_idxes) - 1 + 1e-6)
 
     def is_endnode(self):
-        return self.tokens[-1] == "<EOS>" or len(self.tokens) == self.max_len
+        return self.token_idxes[-1] == self.eos_idx or len(self.token_idxes) == self.max_len
 
-    def get_utterance(self):
-        return "".join([token for token in self.tokens if token not in ["<SOS>", "<EOS>", "<UNK>"]])
+    def get_utterance(self, inv_vocab):
+        tokens = [inv_vocab.get(token_idx) for token_idx in self.token_idxes[1:]]
+        return "".join([token for token in tokens if token not in ["<EOS>", "<UNK>"]])
 
 
 class BeamSearchDecoder:
@@ -60,6 +55,7 @@ class BeamSearchDecoder:
         self.tokenize = tokenize
         self.beam_size = beam_size
         self.vocab = vocab
+        self.inv_vocab = {v: k for k, v in vocab.items()}
         self.max_src_len = max_src_len
         self.max_len = max_len
         self.history_size = history_size
@@ -70,7 +66,7 @@ class BeamSearchDecoder:
         src = self.model.encode(src_seqs, src_turns)  # 1 * s * e
         src_mask = (src_seqs != 0).unsqueeze(1)
         nodes = PriorityQueue()
-        nodes.push(0, BeamSearchNode(self.vocab, words, self.max_len))
+        nodes.push(0, BeamSearchNode(self.vocab["<SOS>"], self.vocab["<EOS>"], self.max_len))
         endnodes = []
         while not nodes.empty():
             selected_nodes = self._select_nodes(nodes, endnodes)
@@ -81,12 +77,11 @@ class BeamSearchDecoder:
             src_mask_ = src_mask.repeat(len(selected_nodes), 1, 1)
             segment_type_ = segment_type.repeat(len(selected_nodes), 1)
             transform_matrix_ = transform_matrix.repeat(len(selected_nodes), 1, 1)
-        
             tgt_seqs, tgt_turns = self._convert_tgt_input(selected_nodes)
             logps = self.model.decode(src_, src_mask_, tgt_seqs, tgt_turns, segment_type_, transform_matrix_)
-            self._select_topk(nodes, selected_nodes, logps)
-
-        utterances_with_socres = [(node.get_utterance(), node.score) for node in endnodes]
+            self._select_topk(nodes, selected_nodes, logps, words)
+        endnodes = sorted(endnodes, key= lambda node: node.score, reverse=True)
+        utterances_with_socres = [(node.get_utterance(self.inv_vocab), node.score) for node in endnodes]
         return utterances_with_socres
     
     def _select_nodes(self, nodes, endnodes):
@@ -101,17 +96,19 @@ class BeamSearchDecoder:
             selected_nodes.append(node)
         return selected_nodes
 
-    def _select_topk(self, nodes, selected_nodes, logps):
-        logps = logps[:,-1]
+    def _select_topk(self, nodes, selected_nodes, logps, words):
+        num_words = len(words)
+        logps = logps[:,-1, :num_words]
+        logps = logps.cpu().detach()
         top_logps, top_idxes = torch.topk(logps, self.beam_size)
-        top_logps = top_logps.cpu().detach().numpy()
-        top_idxes = top_idxes.cpu().detach().numpy()
+        top_logps = top_logps.numpy()
+        top_idxes = top_idxes.numpy()
 
         for i in range(len(selected_nodes)):
             node = selected_nodes[i]
             for logp, idx in zip(top_logps[i], top_idxes[i]): 
                 new_node = copy.deepcopy(node)
-                new_node.append(idx, logp)
+                new_node.append(words[idx], logp)
                 nodes.push(new_node.score, new_node)
 
     def _convert_src_input(self, history_utterances, current_utterance):
