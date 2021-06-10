@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import math
+from torchcrf import CRF
 
 
 class LstmRewriterModel(nn.Module):
@@ -18,6 +19,7 @@ class LstmRewriterModel(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.hidden = nn.Sequential(nn.Linear(3, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU()) # number of attention types, number of class
         self.out = nn.Linear(32, 3)
+        self.crf = CRF(3, batch_first=True)
         self.loss = nn.CrossEntropyLoss(weight=class_weights)
 
     def forward(self, contexts, utterances, labels=None):
@@ -33,11 +35,14 @@ class LstmRewriterModel(nn.Module):
         hidden = self.hidden(attn_features)
         logits = self.out(hidden)
         if labels is not None:
-            logits = logits.view(-1, 3)
-            labels = labels.view(-1)
-            return self.loss(logits, labels)
+            # logits = logits.view(-1, 3)
+            # labels = labels.view(-1)
+            # return self.loss(logits, labels)
+            loss = -self.crf(logits, labels)
+            return loss
         else:
-            return logits
+            # return logits
+            return self.crf.decode(logits)
 
     def _init_hidden(self, batch_size, device):
         return (torch.randn(2, batch_size, self.hidden_dims // 2, device=device),
