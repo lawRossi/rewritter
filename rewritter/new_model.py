@@ -16,7 +16,8 @@ class LstmRewriterModel(nn.Module):
         std = math.sqrt(6 / (self.W.shape[0]))
         self.W.data.uniform_(-std, std)
         self.dropout = nn.Dropout(dropout)
-        self.out = nn.Linear(3, 3) # number of attention types, number of class
+        self.hidden = nn.Sequential(nn.Linear(3, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU()) # number of attention types, number of class
+        self.out = nn.Linear(32, 3)
         self.loss = nn.CrossEntropyLoss(weight=class_weights)
 
     def forward(self, contexts, utterances, labels=None):
@@ -29,7 +30,8 @@ class LstmRewriterModel(nn.Module):
         """
         ctx, utr = self._get_lstm_features(contexts, utterances)
         attn_features = self._get_attn_features(ctx, utr, contexts.shape[0])
-        logits = self.out(attn_features)
+        hidden = self.hidden(attn_features)
+        logits = self.out(hidden)
         if labels is not None:
             logits = logits.view(-1, 3)
             labels = labels.view(-1)
