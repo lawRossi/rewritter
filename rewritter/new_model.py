@@ -30,7 +30,7 @@ class LstmRewriterModel(nn.Module):
         """
         ctx, utr = self._get_lstm_features(contexts, utterances)
         attn_features = self._get_attn_features(ctx, utr, contexts.shape[0])
-        hidden = self.hidden(self.dropout(attn_features))
+        hidden = self.hidden(attn_features)
         logits = self.out(hidden)
         if labels is not None:
             logits = logits.view(-1, 3)
