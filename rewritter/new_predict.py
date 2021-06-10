@@ -19,11 +19,10 @@ class ModelWrapper:
         contexts_array, utterances_array = self._text2array(contexts, utterances)
         contexts_tensor = self._array2tensor(contexts_array)
         utterances_tensor = self._array2tensor(utterances_array)
-        labels = self.model(contexts_tensor, utterances_tensor)
-        # labels = torch.softmax(logits, dim=-1).argmax(dim=-1)
-        labels = np.array(labels)
+        logits = self.model(contexts_tensor, utterances_tensor)
+        labels = torch.softmax(logits, dim=-1).argmax(dim=-1)
         matrixes = labels.reshape(contexts_tensor.shape[0], self.max_ctx_len, self.max_utr_len)
-        # matrixes = matrixes.cpu().detach().numpy()
+        matrixes = matrixes.cpu().detach().numpy()
         target_texts = []
         for i, matrix in enumerate(matrixes):
             connect_matrix = np.where(matrix != 0, 1, 0)

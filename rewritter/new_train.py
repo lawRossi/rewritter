@@ -62,8 +62,8 @@ def test(model, data_loader, device):
         contexts = batch["context"]
         utterances = batch["utterance"]
         labels = batch["labels"].cpu().numpy()
-        preds = model(contexts, utterances)
-        # preds = torch.softmax(logits, dim=-1).argmax(dim=-1).cpu().detach().numpy()
+        logits = model(contexts, utterances)
+        preds = torch.softmax(logits, dim=-1).argmax(dim=-1).cpu().detach().numpy()
         all_labels.extend(chain.from_iterable(labels))
         all_preds.extend(chain.from_iterable(preds))
         if i == 3:
