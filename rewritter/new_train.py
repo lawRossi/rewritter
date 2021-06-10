@@ -1,4 +1,3 @@
-from operator import mod
 from torch.utils.data import DataLoader
 from rewritter.dataset import RewritterDataset
 from .new_model import LstmRewriterModel
@@ -62,9 +61,9 @@ def test(model, data_loader, device):
         batch = {k: v.to(device) for k, v in batch.items()}
         contexts = batch["context"]
         utterances = batch["utterance"]
-        labels = batch["labels"]
+        labels = batch["labels"].cpu().numpy()
         logits = model(contexts, utterances)
-        preds = torch.softmax(logits, dim=-1).argmax(dim=-1)
+        preds = torch.softmax(logits, dim=-1).argmax(dim=-1).cpu().detach().numpy()
         all_labels.extend(chain.from_iterable(labels))
         all_preds.extend(chain.from_iterable(preds))
         if i == 3:

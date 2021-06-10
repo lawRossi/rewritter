@@ -11,7 +11,8 @@ class LstmRewriterModel(nn.Module):
         self.embedding.weight.data.uniform_(-init_range, init_range)
         self.hidden_dims = hidden_dims
         self.bilstm = nn.LSTM(emb_dims, hidden_dims // 2, bidirectional=True, batch_first=True)
-        self.W = nn.Parameter(torch.randn(hidden_dims, hidden_dims))
+        # self.W = nn.Parameter(torch.randn(hidden_dims, hidden_dims))
+        self.W = nn.Linear(self.hidden_dims, hidden_dims)
         self.dropout = nn.Dropout(dropout)
         self.out = nn.Linear(3, 3) # number of attention types, number of class
         self.loss = nn.CrossEntropyLoss(weight=class_weights)
@@ -54,7 +55,8 @@ class LstmRewriterModel(nn.Module):
     def _get_attn_features(self, ctx, utr, batch_size):
         attn_features = []
         dot = torch.bmm(ctx, utr.permute(0, 2, 1)).unsqueeze(1)
-        bilinear = torch.matmul(ctx, self.W).bmm(utr.permute(0, 2, 1)).unsqueeze(1)
+        # bilinear = torch.matmul(ctx, self.W).bmm(utr.permute(0, 2, 1)).unsqueeze(1)
+        bilinear = torch.bmm(self.W(ctx), utr.permute(0, 2, 1)).unsqueeze(1)
         ctx = F.normalize(ctx)
         utr = F.normalize(utr)
         cosine =  torch.bmm(ctx, utr.permute(0, 2, 1)).unsqueeze(1)
