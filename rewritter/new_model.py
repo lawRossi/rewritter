@@ -4,15 +4,17 @@ import torch.nn.functional as F
 
 
 class LstmRewriterModel(nn.Module):
-    def __init__(self, vocab_size, emb_dims, hidden_dims, dropout=0.3):
+    def __init__(self, vocab_size, emb_dims, hidden_dims, class_weights=None, dropout=0.3):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, emb_dims, padding_idx=0)
+        init_range = 0.5 / emb_dims
+        self.embedding.weight.data.uniform_(-init_range, init_range)
         self.hidden_dims = hidden_dims
         self.bilstm = nn.LSTM(emb_dims, hidden_dims // 2, bidirectional=True, batch_first=True)
         self.W = nn.Parameter(torch.randn(hidden_dims, hidden_dims))
         self.dropout = nn.Dropout(dropout)
         self.out = nn.Linear(3, 3) # number of attention types, number of class
-        self.loss = nn.CrossEntropyLoss()
+        self.loss = nn.CrossEntropyLoss(weight=class_weights)
 
     def forward(self, contexts, utterances, labels=None):
         """[summary]
