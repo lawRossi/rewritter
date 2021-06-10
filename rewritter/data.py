@@ -3,7 +3,6 @@ from collections import defaultdict
 from itertools import chain
 import numpy as np
 import jieba
-import re
 
 
 class RewritterDataset(Dataset):
@@ -109,19 +108,22 @@ class RewritterDataset(Dataset):
         self.data = converted_data
 
 
-p = re.compile("[a-zA-Z0-9]+")
+def is_all_chinese(word):
+    for _char in word:
+        if not '\u4e00' <= _char <= '\u9fa5':
+            return False
+    return True
 
 
 def tokenize(utterance):
     tokens = jieba.lcut(utterance)
     flat_tokens = []
     for token in tokens:
-        if p.match(token):
+        if not is_all_chinese(token):
             flat_tokens.append(token)
         else:
             flat_tokens.extend(token)
     return flat_tokens
-
 
 
 if __name__ == "__main__":
