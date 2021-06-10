@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import math
 
 
 class LstmRewriterModel(nn.Module):
@@ -12,6 +13,8 @@ class LstmRewriterModel(nn.Module):
         self.hidden_dims = hidden_dims
         self.bilstm = nn.LSTM(emb_dims, hidden_dims // 2, bidirectional=True, batch_first=True)
         self.W = nn.Parameter(torch.randn(hidden_dims, hidden_dims))
+        std = math.sqrt(6 / (self.W.shape[0]))
+        self.W.data.uniform_(-std, std)
         self.dropout = nn.Dropout(dropout)
         self.out = nn.Linear(3, 3) # number of attention types, number of class
         self.loss = nn.CrossEntropyLoss(weight=class_weights)
