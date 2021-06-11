@@ -16,7 +16,7 @@ class ModelWrapper:
         self.device = device
 
     def predict(self, contexts, utterances):
-        contexts_array, utterances_array = self._text2array(contexts, utterances)
+        contexts_array, utterances_array, masks = self._text2array(contexts, utterances)
         contexts_tensor = self._array2tensor(contexts_array)
         utterances_tensor = self._array2tensor(utterances_array)
         logits = self.model(contexts_tensor, utterances_tensor)
@@ -25,6 +25,7 @@ class ModelWrapper:
         matrixes = matrixes.cpu().detach().numpy()
         target_texts = []
         for i, matrix in enumerate(matrixes):
+            matrix = matrix * masks[i]
             connect_matrix = np.where(matrix != 0, 1, 0)
             boxes = self._scan_twice(connect_matrix)
             for box in boxes:
@@ -61,6 +62,7 @@ class ModelWrapper:
     def _text2array(self, contexts, utterances):
         contexts_arrays = []
         utterance_arrays = []
+        masks = []
         for context, utterance in zip(contexts, utterances):
             context_tokens = []
             for text in context:
@@ -75,8 +77,13 @@ class ModelWrapper:
             utterance_idxes = utterance_idxes[-self.max_utr_len:] + [0] * (self.max_utr_len - len(utterance_idxes))
             contexts_arrays.append(context_idxes)
             utterance_arrays.append(utterance_idxes)
-        return contexts_arrays, utterance_arrays
-    
+            context_mask = np.array(context_idxes) != 0
+            utterance_mask = np.array(utterance_idxes) != 0
+            mask = np.outer(context_mask, utterance_mask)
+            masks.append(mask)
+
+        return contexts_arrays, utterance_arrays, masks
+
     def _array2tensor(self, array):
         return torch.tensor(array, dtype=torch.long)
 
