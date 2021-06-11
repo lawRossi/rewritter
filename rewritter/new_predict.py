@@ -85,7 +85,7 @@ class ModelWrapper:
         return contexts_arrays, utterance_arrays, masks
 
     def _array2tensor(self, array):
-        return torch.tensor(array, dtype=torch.long)
+        return torch.tensor(array, dtype=torch.long, device=self.device)
 
     def _scan_twice(self, matrix):
         label_num = 1
