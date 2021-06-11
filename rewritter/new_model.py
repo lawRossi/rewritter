@@ -12,8 +12,10 @@ class LstmRewriterModel(nn.Module):
         self.embedding.weight.data.uniform_(-init_range, init_range)
         self.hidden_dims = hidden_dims
         self.bilstm = nn.LSTM(emb_dims, hidden_dims // 2, bidirectional=True, batch_first=True)
-        self.W = nn.Parameter(torch.randn(hidden_dims, hidden_dims))
-        self.W_emb = nn.Parameter(torch.randn(emb_dims, emb_dims))
+        # self.W = nn.Parameter(torch.randn(hidden_dims, hidden_dims))
+        self.W = nn.Linear(hidden_dims, hidden_dims)
+        # self.W_emb = nn.Parameter(torch.randn(emb_dims, emb_dims))
+        self.W_emb = nn.Linear(emb_dims, emb_dims)
         self.dropout = nn.Dropout(dropout)
         if segment_type == "fc":
             self.hidden = nn.Sequential(nn.Linear(6, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU()) # number of attention types, number of class
@@ -68,7 +70,8 @@ class LstmRewriterModel(nn.Module):
     def _get_attn_features(self, ctx_emb, utr_emb, ctx, utr):
         attn_features = []
         emb_dot = torch.bmm(ctx_emb, utr_emb.permute(0, 2, 1)).unsqueeze(1)
-        emb_bilinear = torch.matmul(ctx_emb, self.W_emb).bmm(utr_emb.permute(0, 2, 1)).unsqueeze(1)
+        # emb_bilinear = torch.matmul(ctx_emb, self.W_emb).bmm(utr_emb.permute(0, 2, 1)).unsqueeze(1)
+        emb_bilinear = torch.matmul(self.W_emb(ctx_emb), utr_emb.permute(0, 2, 1)).unsqueeze(1)
         ctx_emb = F.normalize(ctx_emb)
         utr_emb = F.normalize(utr_emb)
         emb_cosine =  torch.bmm(ctx_emb, utr_emb.permute(0, 2, 1)).unsqueeze(1)
@@ -77,7 +80,8 @@ class LstmRewriterModel(nn.Module):
         attn_features.append(emb_cosine)
 
         dot = torch.bmm(ctx, utr.permute(0, 2, 1)).unsqueeze(1)
-        bilinear = torch.matmul(ctx, self.W).bmm(utr.permute(0, 2, 1)).unsqueeze(1)
+        # bilinear = torch.matmul(ctx, self.W).bmm(utr.permute(0, 2, 1)).unsqueeze(1)
+        bilinear = torch.matmul(self.W(ctx), utr.permute(0, 2, 1)).unsqueeze(1)
         ctx = F.normalize(ctx)
         utr = F.normalize(utr)
         cosine =  torch.bmm(ctx, utr.permute(0, 2, 1)).unsqueeze(1)
