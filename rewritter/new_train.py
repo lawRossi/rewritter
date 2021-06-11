@@ -67,7 +67,6 @@ def test(model, data_loader, device):
         for label, pred in zip(chain.from_iterable(labels), chain.from_iterable(preds)):
             if label != -1:
                 all_labels.append(label)
-            else:
                 all_preds.append(pred)
         if i == 3:
             break

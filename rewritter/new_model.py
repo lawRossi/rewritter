@@ -52,8 +52,8 @@ class LstmRewriterModel(nn.Module):
             return logits
 
     def _init_hidden(self, batch_size, device):
-        return (torch.randn(2, batch_size, self.hidden_dims // 2, device=device),
-                torch.randn(2, batch_size, self.hidden_dims // 2, device=device))
+        return (torch.zeros(2, batch_size, self.hidden_dims // 2, device=device),
+                torch.zeros(2, batch_size, self.hidden_dims // 2, device=device))
     
     def _get_lstm_features(self, ctx_emb, utr_emb, ctx_mask, utr_mask):
         batch_size = ctx_emb.shape[0]
