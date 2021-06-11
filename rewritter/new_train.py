@@ -64,8 +64,11 @@ def test(model, data_loader, device):
         labels = batch["labels"].cpu().numpy()
         logits = model(contexts, utterances)
         preds = torch.softmax(logits, dim=-1).argmax(dim=-1).cpu().detach().numpy()
-        all_labels.extend(chain.from_iterable(labels))
-        all_preds.extend(chain.from_iterable(preds))
+        for label, pred in zip(chain.from_iterable(labels), chain.from_iterable(preds)):
+            if label != -1:
+                all_labels.append(label)
+            else:
+                all_preds.append(pred)
         if i == 3:
             break
     print(classification_report(all_labels, all_preds))

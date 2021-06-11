@@ -345,9 +345,9 @@ def convert_sample(sample, tokenized_sample,  vocab, max_ctx_len, max_cur_len):
     target = translate(utterance, operations)
     if reference != target:
         return {}
-    matrix = matrix + [[0] * len(utterance) for _ in range(max_ctx_len - len(context))]
+    matrix = matrix + [[-1] * len(utterance) for _ in range(max_ctx_len - len(context))]
     for i in range(len(matrix)):
-        matrix[i] += [0] * (max_cur_len - len(utterance))
+        matrix[i] += [-1] * (max_cur_len - len(utterance))
     context += [0] * (max_ctx_len - len(context))
     utterance += [0] * (max_cur_len - len(utterance))
     labels = list(chain.from_iterable(matrix))

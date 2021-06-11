@@ -1,11 +1,11 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import math
+from .unet import AttentionUNet
 
 
 class LstmRewriterModel(nn.Module):
-    def __init__(self, vocab_size, emb_dims, hidden_dims, class_weights=None, dropout=0.3):
+    def __init__(self, vocab_size, emb_dims, hidden_dims, class_weights=None, dropout=0.3, segment_type="fc"):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, emb_dims, padding_idx=0)
         init_range = 0.5 / emb_dims
@@ -15,29 +15,39 @@ class LstmRewriterModel(nn.Module):
         self.W = nn.Parameter(torch.randn(hidden_dims, hidden_dims))
         self.W_emb = nn.Parameter(torch.randn(emb_dims, emb_dims))
         self.dropout = nn.Dropout(dropout)
-        self.hidden = nn.Sequential(nn.Linear(6, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU()) # number of attention types, number of class
-        self.out = nn.Linear(32, 3)
-        self.loss = nn.CrossEntropyLoss(weight=class_weights)
+        if segment_type == "fc":
+            self.hidden = nn.Sequential(nn.Linear(6, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU()) # number of attention types, number of class
+            self.out = nn.Linear(32, 3)
+        else:
+            self.unet = AttentionUNet(6, 3, 256)
+        self.segment_type = segment_type
+        self.loss = nn.CrossEntropyLoss(weight=class_weights, ignore_index=-1)
 
     def forward(self, contexts, utterances, labels=None):
-        """[summary]
+        """
 
         Args:
             contexts (torch.tensor]): (b x ctx_len)
             utterances ([type]): b x utr_len
             labels ([type], optional): b x (ctx_len * utr_len)
         """
+        ctx_mask = (contexts != 0).float()
+        utr_mask = (utterances != 0).float()
         ctx_emb = self.embedding(contexts)  
         utr_emb = self.embedding(utterances)
-        ctx, utr = self._get_lstm_features(ctx_emb, utr_emb)
-        attn_features = self._get_attn_features(ctx_emb, utr_emb, ctx, utr, contexts.shape[0])
-        hidden = self.hidden(attn_features)
-        logits = self.out(hidden)
+        ctx, utr = self._get_lstm_features(ctx_emb, utr_emb, ctx_mask, utr_mask)
+        attn_features = self._get_attn_features(ctx_emb, utr_emb, ctx, utr)
+        if self.segment_type == "fc":
+            hidden = self.hidden(attn_features)
+            logits = self.out(hidden)
+        else:
+            batch_size = contexts.shape[0]
+            segment_out = self.unet(attn_features)
+            logits = segment_out.reshape(batch_size, -1, 3)
         if labels is not None:
             logits = logits.view(-1, 3)
             labels = labels.view(-1)
             return self.loss(logits, labels)
-            
         else:
             return logits
 
@@ -45,18 +55,17 @@ class LstmRewriterModel(nn.Module):
         return (torch.randn(2, batch_size, self.hidden_dims // 2, device=device),
                 torch.randn(2, batch_size, self.hidden_dims // 2, device=device))
     
-    def _get_lstm_features(self, ctx_emb, utr_emb):
+    def _get_lstm_features(self, ctx_emb, utr_emb, ctx_mask, utr_mask):
         batch_size = ctx_emb.shape[0]
-        ctx_len = ctx_emb.shape[1]
-        emb = torch.cat([ctx_emb, utr_emb], dim=1)
-        emb = self.dropout(emb)
         hidden = self._init_hidden(batch_size, ctx_emb.device)
-        lstm_out, hidden = self.bilstm(emb, hidden)
-        ctx = lstm_out[:, :ctx_len, :]
-        utr = lstm_out[:, ctx_len:, :]
+        ctx, hidden = self.bilstm(ctx_emb, hidden)
+        ctx = ctx * ctx_mask.unsqueeze(-1)
+        hidden = self._init_hidden(batch_size, utr_emb.device)
+        utr, hidden = self.bilstm(utr_emb, hidden)
+        utr = utr * utr_mask.unsqueeze(-1)
         return ctx, utr
-    
-    def _get_attn_features(self, ctx_emb, utr_emb, ctx, utr, batch_size):
+
+    def _get_attn_features(self, ctx_emb, utr_emb, ctx, utr):
         attn_features = []
         emb_dot = torch.bmm(ctx_emb, utr_emb.permute(0, 2, 1)).unsqueeze(1)
         emb_bilinear = torch.matmul(ctx_emb, self.W_emb).bmm(utr_emb.permute(0, 2, 1)).unsqueeze(1)
@@ -75,10 +84,11 @@ class LstmRewriterModel(nn.Module):
         attn_features.append(dot)
         attn_features.append(bilinear)
         attn_features.append(cosine)
-
         num_attns = len(attn_features)
         attn_features = torch.cat(attn_features, dim=1)
-        attn_features = attn_features.reshape(batch_size, num_attns, -1)
-        attn_features = attn_features.permute(0, 2, 1)
+        if self.segment_type == "fc":
+            batch_size = ctx_emb.shape[0]
+            attn_features = attn_features.reshape(batch_size, num_attns, -1)
+            attn_features = attn_features.permute(0, 2, 1)
 
         return attn_features
