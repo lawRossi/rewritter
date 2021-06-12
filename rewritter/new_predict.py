@@ -32,6 +32,8 @@ class ModelWrapper:
                 x1, x2 = box[0]
                 y1, y2 = box[1]
                 counts = Counter(matrix[y1:y2, x1:x2].flatten())
+                if 0 in counts:
+                    del counts[0]
                 label = counts.most_common(1)[0][0]
                 matrix[y1:y2, x1:x2] = label
             operations = get_operations(contexts_array[i], matrix)
