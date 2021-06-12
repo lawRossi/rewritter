@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .unet import AttentionUNet
+from allennlp.modules.input_variational_dropout import InputVariationalDropout
 
 
 class LstmRewriterModel(nn.Module):
@@ -16,8 +17,8 @@ class LstmRewriterModel(nn.Module):
         self.W = nn.Linear(hidden_dims, hidden_dims)
         # self.W_emb = nn.Parameter(torch.randn(emb_dims, emb_dims))
         self.W_emb = nn.Linear(emb_dims, emb_dims)
-        self.dropout_in = nn.Dropout(drop_in)
-        self.dropout_out = nn.Dropout(drop_out)
+        self.dropout_in = InputVariationalDropout(drop_in)
+        self.dropout_out = InputVariationalDropout(drop_out)
         if segment_type == "fc":
             self.hidden = nn.Sequential(nn.Linear(6, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU()) # number of attention types, number of class
             self.out = nn.Linear(32, 3)
