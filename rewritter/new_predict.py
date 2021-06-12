@@ -15,8 +15,8 @@ class ModelWrapper:
         self.max_utr_len = max_utr_len
         self.device = device
 
-    def predict(self, contexts, utterances):
-        contexts_array, utterances_array, masks = self._text2array(contexts, utterances)
+    def predict(self, contexts, utterances, method="original", appendix=""):
+        contexts_array, utterances_array, masks = self._text2array(contexts, utterances, appendix)
         contexts_tensor = self._array2tensor(contexts_array)
         utterances_tensor = self._array2tensor(utterances_array)
         logits = self.model(contexts_tensor, utterances_tensor)
@@ -26,7 +26,10 @@ class ModelWrapper:
         target_texts = []
         for i, matrix in enumerate(matrixes):
             matrix = matrix * masks[i]
-            operations = self._derive_operations(contexts_array[i], matrix)
+            if method == "original":
+                operations = self._derive_operations_(contexts_array[i], matrix)
+            else:
+                operations = self._derive_operations(contexts_array[i], matrix)
             target = translate(utterances_array[i], operations)
             tokens = [self.inv_vocab.get(idx) for idx in target if idx in self.inv_vocab]
             target_texts.append(self._tokens2text(tokens))
@@ -45,6 +48,25 @@ class ModelWrapper:
             matrix[y1:y2, x1:x2] = label
         operations = get_operations(contexts, matrix)
         return operations
+
+    def _derive_operations_(self, contexts, matrix):
+        connect_matrix = np.where(matrix == 1, 1, 0)
+        boxes = self._scan_twice(connect_matrix)
+        for box in boxes:
+            x1, x2 = box[0]
+            y1, y2 = box[1]
+            matrix[y1:y2, x1:x2] = 1
+        operations1 = get_operations(contexts, matrix)
+
+        connect_matrix = np.where(matrix == 2, 1, 0)
+        boxes = self._scan_twice(connect_matrix)
+        for box in boxes:
+            x1, x2 = box[0]
+            y1, y2 = box[1]
+            matrix[y1:y2, x1:x2] = 2
+        operations2 = get_operations(contexts, matrix)
+    
+        return operations1 + operations2
     
     def _tokens2text(self, tokens):
         prev_is_not_chinese = False
@@ -65,7 +87,7 @@ class ModelWrapper:
     def _is_chinese(self, token):
         return '\u4e00' <= token <= '\u9fa5'
 
-    def _text2array(self, contexts, utterances):
+    def _text2array(self, contexts, utterances, appendix):
         contexts_arrays = []
         utterance_arrays = []
         masks = []
@@ -74,7 +96,7 @@ class ModelWrapper:
             for text in context:
                 tokens = self.tokenize(text)
                 tokens.append("<SEP>")
-            context_tokens.extend(tokens)
+                context_tokens.extend(tokens)
             context_idxes = [self.vocab.get(token, self.vocab["<UNK>"]) for token in context_tokens]
             context_idxes = context_idxes[-self.max_ctx_len:] + [0] * (self.max_ctx_len - len(context_idxes))
             utterance_tokens = self.tokenize(utterance)
