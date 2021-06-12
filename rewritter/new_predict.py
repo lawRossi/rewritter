@@ -26,7 +26,7 @@ class ModelWrapper:
         target_texts = []
         for i, matrix in enumerate(matrixes):
             matrix = matrix * masks[i]
-            operations = self._derive_operations_(contexts_array[i], matrix)
+            operations = self._derive_operations(contexts_array[i], matrix)
             target = translate(utterances_array[i], operations)
             tokens = [self.inv_vocab.get(idx) for idx in target if idx in self.inv_vocab]
             target_texts.append(self._tokens2text(tokens))
