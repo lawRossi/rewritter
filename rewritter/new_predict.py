@@ -46,25 +46,6 @@ class ModelWrapper:
         operations = get_operations(contexts, matrix)
         return operations
     
-    def _derive_operations_(self, contexts, matrix):
-        connect_matrix = np.where(matrix == 1, 1, 0)
-        boxes = self._scan_twice(connect_matrix)
-        for box in boxes:
-            x1, x2 = box[0]
-            y1, y2 = box[1]
-            matrix[y1:y2, x1:x2] = 1
-        operations1 = get_operations(contexts, matrix)
-
-        connect_matrix = np.where(matrix == 2, 1, 0)
-        boxes = self._scan_twice(connect_matrix)
-        for box in boxes:
-            x1, x2 = box[0]
-            y1, y2 = box[1]
-            matrix[y1:y2, x1:x2] = 2
-        operations2 = get_operations(contexts, matrix)
-
-        return operations1 + operations2
-
     def _tokens2text(self, tokens):
         prev_is_not_chinese = False
         text = ""
