@@ -26,21 +26,44 @@ class ModelWrapper:
         target_texts = []
         for i, matrix in enumerate(matrixes):
             matrix = matrix * masks[i]
-            connect_matrix = np.where(matrix != 0, 1, 0)
-            boxes = self._scan_twice(connect_matrix)
-            for box in boxes:
-                x1, x2 = box[0]
-                y1, y2 = box[1]
-                counts = Counter(matrix[y1:y2, x1:x2].flatten())
-                if 0 in counts:
-                    del counts[0]
-                label = counts.most_common(1)[0][0]
-                matrix[y1:y2, x1:x2] = label
-            operations = get_operations(contexts_array[i], matrix)
+            operations = self._derive_operations_(contexts_array[i], matrix)
             target = translate(utterances_array[i], operations)
             tokens = [self.inv_vocab.get(idx) for idx in target if idx in self.inv_vocab]
             target_texts.append(self._tokens2text(tokens))
         return target_texts
+    
+    def _derive_operations(self, contexts, matrix):
+        connect_matrix = np.where(matrix != 0, 1, 0)
+        boxes = self._scan_twice(connect_matrix)
+        for box in boxes:
+            x1, x2 = box[0]
+            y1, y2 = box[1]
+            counts = Counter(matrix[y1:y2, x1:x2].flatten())
+            if 0 in counts:
+                del counts[0]
+            label = counts.most_common(1)[0][0]
+            matrix[y1:y2, x1:x2] = label
+        operations = get_operations(contexts, matrix)
+        return operations
+    
+    def _derive_operations_(self, contexts, matrix):
+        connect_matrix = np.where(matrix == 1, 1, 0)
+        boxes = self._scan_twice(connect_matrix)
+        for box in boxes:
+            x1, x2 = box[0]
+            y1, y2 = box[1]
+            matrix[y1:y2, x1:x2] = 1
+        operations1 = get_operations(contexts, matrix)
+
+        connect_matrix = np.where(matrix == 2, 1, 0)
+        boxes = self._scan_twice(connect_matrix)
+        for box in boxes:
+            x1, x2 = box[0]
+            y1, y2 = box[1]
+            matrix[y1:y2, x1:x2] = 2
+        operations2 = get_operations(contexts, matrix)
+
+        return operations1 + operations2
 
     def _tokens2text(self, tokens):
         prev_is_not_chinese = False
