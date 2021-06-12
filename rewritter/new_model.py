@@ -5,7 +5,7 @@ from .unet import AttentionUNet
 
 
 class LstmRewriterModel(nn.Module):
-    def __init__(self, vocab_size, emb_dims, hidden_dims, class_weights=None, dropout=0.3, segment_type="fc"):
+    def __init__(self, vocab_size, emb_dims, hidden_dims, class_weights=None, drop_in=0.2, drop_out=0.3, segment_type="fc"):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, emb_dims, padding_idx=0)
         init_range = 0.5 / emb_dims
@@ -16,7 +16,8 @@ class LstmRewriterModel(nn.Module):
         self.W = nn.Linear(hidden_dims, hidden_dims)
         # self.W_emb = nn.Parameter(torch.randn(emb_dims, emb_dims))
         self.W_emb = nn.Linear(emb_dims, emb_dims)
-        self.dropout = nn.Dropout(dropout)
+        self.dropout_in = nn.Dropout(drop_in)
+        self.dropout_out = nn.Dropout(drop_out)
         if segment_type == "fc":
             self.hidden = nn.Sequential(nn.Linear(6, 128), nn.ReLU(), nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.ReLU()) # number of attention types, number of class
             self.out = nn.Linear(32, 3)
@@ -60,11 +61,13 @@ class LstmRewriterModel(nn.Module):
     def _get_lstm_features(self, ctx_emb, utr_emb, ctx_mask, utr_mask):
         batch_size = ctx_emb.shape[0]
         hidden = self._init_hidden(batch_size, ctx_emb.device)
-        ctx, hidden = self.bilstm(ctx_emb, hidden)
+        ctx, hidden = self.bilstm(self.dropout_in(ctx_emb), hidden)
         ctx = ctx * ctx_mask.unsqueeze(-1)
+        ctx = self.dropout_out(ctx)
         hidden = self._init_hidden(batch_size, utr_emb.device)
-        utr, hidden = self.bilstm(utr_emb, hidden)
+        utr, hidden = self.bilstm(self.dropout_in(utr_emb), hidden)
         utr = utr * utr_mask.unsqueeze(-1)
+        utr = self.dropout_out(utr)
         return ctx, utr
 
     def _get_attn_features(self, ctx_emb, utr_emb, ctx, utr):
