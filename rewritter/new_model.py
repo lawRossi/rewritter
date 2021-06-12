@@ -9,8 +9,8 @@ class LstmRewriterModel(nn.Module):
     def __init__(self, vocab_size, emb_dims, hidden_dims, class_weights=None, drop_in=0.2, drop_out=0.3, segment_type="fc"):
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, emb_dims, padding_idx=0)
-        init_range = 0.5 / emb_dims
-        self.embedding.weight.data.uniform_(-init_range, init_range)
+        # init_range = 0.5 / emb_dims
+        # self.embedding.weight.data.uniform_(-init_range, init_range)
         self.hidden_dims = hidden_dims
         self.bilstm = nn.LSTM(emb_dims, hidden_dims // 2, bidirectional=True, batch_first=True)
         self.W = nn.Parameter(torch.Tensor(hidden_dims, hidden_dims))
