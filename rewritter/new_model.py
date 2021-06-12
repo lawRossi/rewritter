@@ -37,8 +37,7 @@ class LstmRewriterModel(nn.Module):
         """
         ctx_mask = (contexts != 0).float()
         utr_mask = (utterances != 0).float()
-        ctx_emb = self.embedding(contexts)  
-        utr_emb = self.embedding(utterances)
+        ctx_emb, utr_emb = self._get_embedding(contexts, utterances)
         ctx, utr = self._get_lstm_features(ctx_emb, utr_emb, ctx_mask, utr_mask)
         attn_features = self._get_attn_features(ctx_emb, utr_emb, ctx, utr)
         if self.segment_type == "fc":
@@ -59,14 +58,24 @@ class LstmRewriterModel(nn.Module):
         return (torch.zeros(2, batch_size, self.hidden_dims // 2, device=device),
                 torch.zeros(2, batch_size, self.hidden_dims // 2, device=device))
     
+    def _get_embedding(self, contexts, utterances):
+        ctx_emb = self.embedding(contexts)  
+        utr_emb = self.embedding(utterances)
+        emb = torch.cat([ctx_emb, utr_emb], dim=1)
+        emb = self.dropout_in(emb)
+        ctx_len = contexts.shape[1]
+        ctx_emb = emb[:, :ctx_len, :]
+        utr_emb = emb[:, ctx_len:, :]
+        return ctx_emb, utr_emb
+
     def _get_lstm_features(self, ctx_emb, utr_emb, ctx_mask, utr_mask):
         batch_size = ctx_emb.shape[0]
         hidden = self._init_hidden(batch_size, ctx_emb.device)
-        ctx, hidden = self.bilstm(self.dropout_in(ctx_emb), hidden)
+        ctx, hidden = self.bilstm(ctx_emb, hidden)
         ctx = ctx * ctx_mask.unsqueeze(-1)
         ctx = self.dropout_out(ctx)
         hidden = self._init_hidden(batch_size, utr_emb.device)
-        utr, hidden = self.bilstm(self.dropout_in(utr_emb), hidden)
+        utr, hidden = self.bilstm(utr_emb, hidden)
         utr = utr * utr_mask.unsqueeze(-1)
         utr = self.dropout_out(utr)
         return ctx, utr
