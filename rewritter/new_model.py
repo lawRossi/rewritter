@@ -106,25 +106,23 @@ class LstmRewriterModel(nn.Module):
         batch_size = ctx_emb.shape[0]
         hidden = self._init_hidden(batch_size, ctx_emb.device)
         ctx, hidden = self.bilstm(ctx_emb, hidden)
-        ctx = ctx * ctx_mask.unsqueeze(-1).float()
+        # ctx = ctx * ctx_mask.unsqueeze(-1).float()
         ctx = self.dropout_out(ctx)
         hidden = self._init_hidden(batch_size, utr_emb.device)
         utr, hidden = self.bilstm(utr_emb, hidden)
-        utr = utr * utr_mask.unsqueeze(-1).float()
+        # utr = utr * utr_mask.unsqueeze(-1).float()
         utr = self.dropout_out(utr)
         return ctx, utr
     
     def _get_cross_features(self, ctx, utr, ctx_mask, utr_mask):
         concated = torch.cat([ctx, utr], dim=1)
-        mask = torch.cat([ctx_mask, utr_mask], dim=1)
+        mask = torch.cat([ctx_mask, utr_mask], dim=1).unsqueeze(1)
         crossed = self.transformer(concated, mask)
         ctx_len = ctx.shape[1]
         ctx = crossed[:, :ctx_len, :]
         utr = crossed[:, ctx_len: , :]
         ctx = ctx * ctx_mask.unsqueeze(-1).float()
         utr = utr * utr_mask.unsqueeze(-1).float()
-        print(ctx)
-        print(utr)
         return ctx, utr
 
     def _get_attn_features(self, ctx_emb, utr_emb, ctx, utr):
