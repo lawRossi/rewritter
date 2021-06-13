@@ -6,7 +6,7 @@ from allennlp.modules.input_variational_dropout import InputVariationalDropout
 import math
 import torch
 from . import utils
-from  .model import EncoderLayer
+from .model import EncoderLayer
 
 
 class LinearMatrixAttention(nn.Module):
@@ -45,6 +45,7 @@ class LstmRewriterModel(nn.Module):
         # self.embedding.weight.data.uniform_(-init_range, init_range)
         self.hidden_dims = hidden_dims
         self.bilstm = nn.LSTM(emb_dims, hidden_dims // 2, bidirectional=True, batch_first=True)
+        self.transformer = EncoderLayer(hidden_dims, 8)
         self.W = nn.Parameter(torch.Tensor(hidden_dims, hidden_dims))
         torch.nn.init.xavier_uniform_(self.W)
         self.W_emb = nn.Parameter(torch.Tensor(emb_dims, emb_dims))
@@ -57,10 +58,6 @@ class LstmRewriterModel(nn.Module):
             self.out = nn.Linear(16, 3)
         elif segment_type == "unet":
             self.unet = AttentionUNet(7, 3, 256)
-        elif segment_type == "mha":
-            self.hidden = nn.Linear(7, 30)
-            self.mha = nn.MultiheadAttention(30, 3)
-            self.out = nn.Linear(30, 3)
         self.segment_type = segment_type
         self.loss = nn.CrossEntropyLoss(weight=class_weights, ignore_index=-1)
 
@@ -75,6 +72,7 @@ class LstmRewriterModel(nn.Module):
         utr_mask = utterances != 0
         ctx_emb, utr_emb = self._get_embedding(contexts, utterances)
         ctx, utr = self._get_lstm_features(ctx_emb, utr_emb, ctx_mask, utr_mask)
+        ctx, utr = self._get_cross_features(ctx, utr, ctx_mask, utr_mask)
         attn_features = self._get_attn_features(ctx_emb, utr_emb, ctx, utr)
         if self.segment_type == "fc":
             hidden = self.hidden(attn_features)
@@ -83,11 +81,6 @@ class LstmRewriterModel(nn.Module):
             batch_size = contexts.shape[0]
             segment_out = self.unet(attn_features)
             logits = segment_out.reshape(batch_size, -1, 3)
-        else:
-            hidden = self.hidden(attn_features)
-            permuted = hidden.transpose(1, 0)
-            mha, _ = self.mha(permuted, permuted, permuted)
-            logits = self.out(mha.transpose(1, 0))
         if labels is not None:
             logits = logits.view(-1, 3)
             labels = labels.view(-1)
@@ -120,6 +113,19 @@ class LstmRewriterModel(nn.Module):
         utr = utr * utr_mask.unsqueeze(-1).float()
         utr = self.dropout_out(utr)
         return ctx, utr
+    
+    def _get_cross_features(self, ctx, utr, ctx_mask, utr_mask):
+        concated = torch.cat([ctx, utr], dim=1)
+        mask = torch.cat([ctx_mask, utr_mask], dim=1)
+        crossed = self.transformer(concated, mask)
+        ctx_len = ctx.shape[1]
+        ctx = crossed[:, :ctx_len, :]
+        utr = crossed[:, ctx_len: , :]
+        ctx = ctx * ctx_mask.unsqueeze(-1).float()
+        utr = utr * utr_mask.unsqueeze(-1).float()
+        print(ctx)
+        print(utr)
+        return ctx, utr
 
     def _get_attn_features(self, ctx_emb, utr_emb, ctx, utr):
         attn_features = []
@@ -144,7 +150,7 @@ class LstmRewriterModel(nn.Module):
         attn_features.append(linear)
         num_attns = len(attn_features)
         attn_features = torch.cat(attn_features, dim=1)
-        if self.segment_type == "fc" or self.segment_type == "mha":
+        if self.segment_type == "fc":
             batch_size = ctx_emb.shape[0]
             attn_features = attn_features.reshape(batch_size, num_attns, -1)
             attn_features = attn_features.permute(0, 2, 1)
