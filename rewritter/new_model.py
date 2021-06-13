@@ -107,13 +107,13 @@ class LstmRewriterModel(nn.Module):
         hidden = self._init_hidden(batch_size, ctx_emb.device)
         ctx, hidden = self.bilstm(ctx_emb, hidden)
         # ctx = ctx * ctx_mask.unsqueeze(-1).float()
-        ctx = self.dropout_out(ctx)
+        # ctx = self.dropout_out(ctx)
         hidden = self._init_hidden(batch_size, utr_emb.device)
         utr, hidden = self.bilstm(utr_emb, hidden)
         # utr = utr * utr_mask.unsqueeze(-1).float()
-        utr = self.dropout_out(utr)
+        # utr = self.dropout_out(utr)
         return ctx, utr
-    
+
     def _get_cross_features(self, ctx, utr, ctx_mask, utr_mask):
         concated = torch.cat([ctx, utr], dim=1)
         mask = torch.cat([ctx_mask, utr_mask], dim=1).unsqueeze(1)
