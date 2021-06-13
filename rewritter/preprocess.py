@@ -3,6 +3,8 @@ import numpy as np
 from itertools import chain
 import json
 import os
+import re
+from itertools import permutations
 
 
 def longest_common_sequence(sequence1, sequence2):
@@ -235,84 +237,104 @@ def get_operations(history, edit_matrix):
         for j in range(edit_matrix.shape[1]):
             if edit_matrix[i][j] != 0 and processed[i][j] == 0:
                 if edit_matrix[i][j] == 2: # 插入
-                    tokens = []
+                    token_idxes = []
                     for r in range(i, edit_matrix.shape[0]):
                         if edit_matrix[r][j] == 2:
-                            tokens.append(history[r])
-                    operations.append(("insert", j, tokens))
+                            token_idxes.append(r)
+                    tokens_list = token_idxes_2_tokens(history, token_idxes)
+                    operations.append(("insert", j, tokens_list))
                     processed[:, j] = 1
                 else:  # 替换
-                    replaced_group = []
+                    replaced_pos = []
                     for c in range(j, edit_matrix.shape[1]):
                         if edit_matrix[i][c] == 1:
-                            replaced_group.append(c)
+                            replaced_pos.append(c)
                         else:
                             break
-                    tokens = []
+                    token_idxes = []
                     max_r = i
                     for r in range(i, edit_matrix.shape[0]):
                         if edit_matrix[r][j] == 1:
-                            tokens.append(history[r])
+                            token_idxes.append(r)
                             max_r = r
-                    
-                    operations.append(("replace", replaced_group, tokens))
-                    processed[i:max_r+1,j:max(replaced_group)+1] = 1
+                    tokens_list = token_idxes_2_tokens(history, token_idxes)
+                    operations.append(("replace", replaced_pos, tokens_list))
+                    processed[i:max_r+1,j:max(replaced_pos)+1] = 1
     return operations
 
 
+def token_idxes_2_tokens(context, token_idxes):
+    groups = group(token_idxes)
+    tokens_list = []
+    for g in groups:
+        tokens_list.append([context[i] for i in g])
+    return tokens_list
+
+
 def translate(source, operations):
-    result = source.copy()
+    results = [source.copy()]
     operations = sorted(operations, key=lambda x: x[1][0] if isinstance(x[1], list) else x[1])
     offset = 0
     for operation in operations:
+        pos, tokens_list = operation[1], operation[2]
         if operation[0] == "insert":
-            pos, tokens = operation[1], operation[2]
-            result = result[:pos+offset] + tokens + result[pos+offset:]
+            new_results = []
+            for tokens in permute_tokens(tokens_list):
+                for result in results:
+                    result = result[:pos+offset] + tokens + result[pos+offset:]
+                    new_results.append(result)
             offset += len(tokens)
+            results = new_results
         else:
-            pos, tokens = operation[1], operation[2]
-            result = result[:pos[0]+offset] + tokens + result[pos[-1]+offset+1:]
+            new_results = []
+            for tokens in permute_tokens(tokens_list):
+                for result in results:
+                    result = result[:pos[0]+offset] + tokens + result[pos[-1]+offset+1:]
+                    new_results.append(result)
             offset += len(tokens) - len(pos)
-    return result
+            results = new_results
+    return results
 
 
-def convert_dataset(data_file, save_dir, tokenize, min_tf=2, max_ctx_len=80, 
-        max_cur_len=30, sep="\t\t", bert=False, test_size=0.1):
+def permute_tokens(tokens_list):
+    for permutation in permutations(tokens_list):
+        yield list(chain.from_iterable(permutation))
+
+
+def convert_dataset(data_file, save_dir, tokenize, min_tf=1, max_ctx_len=80, 
+        max_cur_len=30, sep="\t\t", bert=False, test_size=0.1, appendix=""):
     with open(data_file, encoding="utf-8") as fi:
         data = []
         for line in fi:
             splits = line.strip().split(sep)
-            data.append(splits)
+            data.append([re.sub("\s+", " ", split.lower()) for split in splits])
 
-    tokenized_data, vocab = tokenize_and_build_vocabulary(data, tokenize, min_tf)
+    tokenized_data, vocab = tokenize_and_build_vocabulary(data, tokenize, min_tf, appendix)
 
     with open(os.path.join(save_dir, "vocab.json"), "w", encoding="utf-8") as fo:
         json.dump(vocab, fo)
 
-    max_ctx = 0
-    max_cur = 0
-    for sample in tokenized_data:
-        ctx = list(chain.from_iterable(sample[:-2]))
-        max_ctx = max(max_ctx, len(ctx))
-        cur = sample[-2]
-        max_cur = max(max_cur, len(cur))
-
     num_train = int(len(tokenized_data) * (1 - test_size))
 
+    n = 0
     with open(os.path.join(save_dir, "train.json"), "w", encoding="utf-8") as fo:
         for sample, tokenized_sample in zip(data[:num_train], tokenized_data[:num_train]):
             result = convert_sample(sample, tokenized_sample, vocab, max_ctx_len, max_cur_len)
             if result:
+                n += 1
                 fo.write(json.dumps(result) + "\n")
-
+    print(n)
+    n = 0
     with open(os.path.join(save_dir, "test.json"), "w", encoding="utf-8") as fo:
         for sample, tokenized_sample in zip(data[num_train:], tokenized_data[num_train:]):
             result = convert_sample(sample, tokenized_sample, vocab, max_ctx_len, max_cur_len)
             if result:
+                n += 1
                 fo.write(json.dumps(result) + "\n")
+    print(n)
 
 
-def tokenize_and_build_vocabulary(data, tokenize, min_tf):
+def tokenize_and_build_vocabulary(data, tokenize, min_tf, appendix):
     tokenized_data = []
     counts = defaultdict(int)
     for sample in data:
@@ -323,6 +345,8 @@ def tokenize_and_build_vocabulary(data, tokenize, min_tf):
             for token in tokens:
                 counts[token] += 1
             tokenized_sample.append(tokens)
+        # add appendix to context
+        tokenized_sample[-3].extend(appendix.split(" "))
         tokenized_data.append(tokenized_sample)
     words = {word for word, count in counts.items() if count >= min_tf}
     words.add("<UNK>")
@@ -342,8 +366,8 @@ def convert_sample(sample, tokenized_sample,  vocab, max_ctx_len, max_cur_len):
     context_labels, utterance_labels = auto_label(context, utterance[:-1], reference[:-1])
     matrix = make_edit_matrix(context_labels, utterance_labels)
     operations = get_operations(context, matrix)
-    target = translate(utterance, operations)
-    if reference != target:
+    targets = translate(utterance, operations)
+    if reference != targets[0]:
         return {}
     matrix = matrix + [[-1] * len(utterance) for _ in range(max_ctx_len - len(context))]
     for i in range(len(matrix)):
@@ -375,7 +399,7 @@ if __name__ == "__main__":
     # print(translate(list("他们我都喜欢"), operations))
 
     # history_labels, source_labels = auto_label(list("梅西和C罗你喜欢谁|梅西"), list("为什么"), list("为什么喜欢梅西"))
-    # assert history_labels == ["COPY1", "COPY1", "O", "O", "O", "O", "COPY1", "COPY1", "O", "O", "O", "O"]
+    # assert history_labels == ["O", "O", "O", "O", "O", "O", "COPY1", "COPY1", "O", "O", "COPY1", "COPY1"]
     # assert source_labels == ["O", "O", "O", "INSERT1"]
     # matrix = make_edit_matrix(history_labels, source_labels)
     # print(matrix)
@@ -390,9 +414,9 @@ if __name__ == "__main__":
     # print(matrix)
     # print(get_operations(list("小王真烦|我想打他"), matrix))
 
-    # context = "一次读百年孤独时就冲动地想要去学西班牙语 可以比肩百年孤独"
-    # source = "面对这样的作品当你没有能力读它的时候千万不要试图去读懂"       
-    # target = "面对百年孤独当你没有能力读百年孤独的时候千万不要试图去读懂"
-    # context_labels, utter_labels = auto_label(context, source, target)
-    # print(context_labels)
-    # print(utter_labels)
+    context = "今天的股市大盘行情怎样 股票今天涨了吗"
+    source = "没涨"
+    target = " 今天股票没涨"
+    context_labels, utter_labels = auto_label(context, source, target)
+    print(context_labels)
+    print(utter_labels)

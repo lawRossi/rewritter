@@ -2,17 +2,25 @@ import torch
 import numpy as np
 from collections import Counter
 from .preprocess import get_operations, translate
+import os.path
+import json
+from . import bleu
+from .import rouge
 
 
 class ModelWrapper:
-    def __init__(self, model_path, vocab, tokenize, max_ctx_len, max_utr_len, device="cpu"):
+    def __init__(self, model_path, tokenize, device="cpu"):
         self.model = torch.load(model_path, map_location=device)
         self.model.eval()
-        self.vocab = vocab
-        self.inv_vocab = {v: k for k, v in vocab.items()}
+        model_dir = os.path.dirname(model_path)
+        with open(os.path.join(model_dir, "vocab.json"), encoding="utf-8") as fi:
+            self.vocab = json.load(fi)
+            self.inv_vocab = {v: k for k, v in self.vocab.items()}
+        with open(os.path.join(model_dir, "params.json"), encoding="utf-8") as fi:
+            params = json.load(fi)
+            self.max_ctx_len = params["max_ctx_len"]
+            self.max_utr_len = params["max_utr_len"]
         self.tokenize = tokenize
-        self.max_ctx_len = max_ctx_len
-        self.max_utr_len = max_utr_len
         self.device = device
 
     def predict(self, contexts, utterances, method="original", appendix=""):
@@ -23,18 +31,21 @@ class ModelWrapper:
         labels = torch.softmax(logits, dim=-1).argmax(dim=-1)
         matrixes = labels.reshape(contexts_tensor.shape[0], self.max_ctx_len, self.max_utr_len)
         matrixes = matrixes.cpu().detach().numpy()
-        target_texts = []
+        predicted_texts = []
         for i, matrix in enumerate(matrixes):
             matrix = matrix * masks[i]
             if method == "original":
                 operations = self._derive_operations_(contexts_array[i], matrix)
             else:
                 operations = self._derive_operations(contexts_array[i], matrix)
-            target = translate(utterances_array[i], operations)
-            tokens = [self.inv_vocab.get(idx) for idx in target if idx in self.inv_vocab]
-            target_texts.append(self._tokens2text(tokens))
-        return target_texts
-    
+            translations = translate(utterances_array[i], operations)
+            translation_texts = []
+            for translation in translations:
+                tokens = [self.inv_vocab.get(idx) for idx in translation if idx in self.inv_vocab]
+                translation_texts.append(self._tokens2text(tokens))
+            predicted_texts.append(translation_texts)
+        return predicted_texts
+
     def _derive_operations(self, contexts, matrix):
         connect_matrix = np.where(matrix != 0, 1, 0)
         boxes = self._scan_twice(connect_matrix)
@@ -97,6 +108,8 @@ class ModelWrapper:
                 tokens = self.tokenize(text)
                 tokens.append("<SEP>")
                 context_tokens.extend(tokens)
+            if appendix:
+                context_tokens.extend(appendix.split(" "))
             context_idxes = [self.vocab.get(token, self.vocab["<UNK>"]) for token in context_tokens]
             context_idxes = context_idxes[-self.max_ctx_len:] + [0] * (self.max_ctx_len - len(context_idxes))
             utterance_tokens = self.tokenize(utterance)
@@ -172,3 +185,54 @@ class ModelWrapper:
             max_height = np.amax(points_y) + 1
             ret_boxes.append([[min_width, max_width], [min_height, max_height]])
         return ret_boxes
+
+
+
+def evaluate_model(model_path, tokenize, test_file, result_file, batch_size=32, device="cpu"):
+    model = ModelWrapper(model_path, tokenize, device)
+    with open(test_file, encoding="utf-8") as fi:
+        samples = []
+        for line in fi:
+            sample = json.loads(line)
+            raw_sample = sample["raw_sample"]
+            context = raw_sample[:-2]
+            utterance = raw_sample[-2]
+            reference = raw_sample[-1]
+            samples.append((context, utterance, reference))
+
+    with open(result_file, "w", encoding="utf-8") as fo:
+        for i in range(0, len(samples), batch_size):
+            batch_contexts = [sample[0] for sample in samples[i:i+batch_size]]
+            batch_utterances = [sample[1] for sample in samples[i:i+batch_size]]
+            batch_references = [sample[2] for sample in samples[i:i+batch_size]]
+            texts = model.predict(batch_contexts, batch_utterances, method="refined")
+            for text, reference in zip(texts, batch_references):
+                fo.write(text[0] + "\t" + reference + "\n")
+    evaluate(result_file, tokenize)    
+
+
+def evaluate(result_file, tokenize):
+    em = 0
+    n = 0
+    predict_tokens = []
+    reference_tokens = []
+    predict_texts = []
+    reference_texts = []
+    with open(result_file, encoding="utf-8") as fi:
+        for line in fi:
+            n += 1
+            text, reference = line.rstrip().split("\t")
+            if text == reference:
+                em += 1
+            pred_tokens = tokenize(text)
+            ref_tokens = tokenize(reference)
+            predict_tokens.append(pred_tokens)
+            reference_tokens.append([ref_tokens])
+            predict_texts.append(" ".join(pred_tokens))
+            reference_texts.append(" ".join(ref_tokens))
+    result = bleu.compute_bleu(reference_tokens, predict_tokens)
+    bleus = result[1]
+    print([f"bleu{i+1}: {bleus[i]}" for i in range(4)])
+    result = rouge.rouge(predict_texts, reference_texts)
+    print([f"{key}: {result[key]}" for key in ["rouge_1/f_score", "rouge_2/f_score", "rouge_l/f_score"]])
+    print(f"em: {em / n}")
