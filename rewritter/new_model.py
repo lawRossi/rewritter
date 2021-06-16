@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from .unet import AttentionUNet
-from allennlp.modules.input_variational_dropout import InputVariationalDropout
+# from allennlp.modules.input_variational_dropout import InputVariationalDropout
 import math
 import torch
 from . import utils
