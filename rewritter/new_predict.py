@@ -9,27 +9,34 @@ from .import rouge
 
 
 class ModelWrapper:
-    def __init__(self, model_path, tokenize, device="cpu"):
+    def __init__(self, model_path, tokenize=None, device="cpu", bert_model=False):
         self.model = torch.load(model_path, map_location=device)
         self.model.eval()
         model_dir = os.path.dirname(model_path)
-        with open(os.path.join(model_dir, "vocab.json"), encoding="utf-8") as fi:
-            self.vocab = json.load(fi)
-            self.inv_vocab = {v: k for k, v in self.vocab.items()}
+        if not bert_model:
+            with open(os.path.join(model_dir, "vocab.json"), encoding="utf-8") as fi:
+                self.vocab = json.load(fi)
+                self.inv_vocab = {v: k for k, v in self.vocab.items()}
+            self.tokenize = tokenize
+        else:
+            self.inv_vocab = {v: k for k, v in self.model.tokenizer.vocab.items()}
+            self.tokenize = self.model.tokenizer
+
         with open(os.path.join(model_dir, "params.json"), encoding="utf-8") as fi:
             params = json.load(fi)
             self.max_ctx_len = params["max_ctx_len"]
             self.max_utr_len = params["max_utr_len"]
-        self.tokenize = tokenize
         self.device = device
+        self.bert_model = bert_model
 
     def predict(self, contexts, utterances, method="original", appendix=""):
-        contexts_array, utterances_array, masks = self._text2array(contexts, utterances, appendix)
-        contexts_tensor = self._array2tensor(contexts_array)
-        utterances_tensor = self._array2tensor(utterances_array)
+        if not self.bert_model:
+            contexts_array, utterances_array, contexts_tensor, utterances_tensor, masks = self._convert_inputs(contexts, utterances, appendix)
+        else:
+            contexts_array, utterances_array, contexts_tensor, utterances_tensor, masks = self._convert_bert_inputs(contexts, utterances, appendix)
         logits = self.model(contexts_tensor, utterances_tensor)
         labels = torch.softmax(logits, dim=-1).argmax(dim=-1)
-        matrixes = labels.reshape(contexts_tensor.shape[0], self.max_ctx_len, self.max_utr_len)
+        matrixes = labels.reshape(len(contexts), self.max_ctx_len, self.max_utr_len)
         matrixes = matrixes.cpu().detach().numpy()
         predicted_texts = []
         for i, matrix in enumerate(matrixes):
@@ -45,6 +52,12 @@ class ModelWrapper:
                 translation_texts.append(self._tokens2text(tokens))
             predicted_texts.append(translation_texts)
         return predicted_texts
+
+    def _convert_inputs(self, contexts, utterances, appendix):
+        contexts_array, utterances_array, masks = self._text2array(contexts, utterances, appendix)
+        contexts_tensor = self._array2tensor(contexts_array)
+        utterances_tensor = self._array2tensor(utterances_array)
+        return contexts_array, utterances_array, contexts_tensor, utterances_tensor, masks
 
     def _derive_operations(self, contexts, matrix):
         connect_matrix = np.where(matrix != 0, 1, 0)
@@ -92,7 +105,9 @@ class ModelWrapper:
                 else:
                     text += token
                 prev_is_not_chinese = True
-        text = text.replace("<SEP>", "")
+        text = text.replace("[SEP]", "")
+        text = text.replace("[PAD]", "")
+        text = text.strip()
         return text            
 
     def _is_chinese(self, token):
@@ -106,14 +121,14 @@ class ModelWrapper:
             context_tokens = []
             for text in context:
                 tokens = self.tokenize(text)
-                tokens.append("<SEP>")
+                tokens.append("[SEP]")
                 context_tokens.extend(tokens)
             if appendix:
                 context_tokens.extend(appendix.split(" "))
             context_idxes = [self.vocab.get(token, self.vocab["<UNK>"]) for token in context_tokens]
             context_idxes = context_idxes[-self.max_ctx_len:] + [0] * (self.max_ctx_len - len(context_idxes))
             utterance_tokens = self.tokenize(utterance)
-            utterance_tokens.append("<SEP>")
+            utterance_tokens.append("[SEP]")
             utterance_idxes = [self.vocab.get(token, self.vocab["<UNK>"]) for token in utterance_tokens]
             utterance_idxes = utterance_idxes[-self.max_utr_len:] + [0] * (self.max_utr_len - len(utterance_idxes))
             contexts_arrays.append(context_idxes)
@@ -127,6 +142,25 @@ class ModelWrapper:
 
     def _array2tensor(self, array):
         return torch.tensor(array, dtype=torch.long, device=self.device)
+    
+    def _convert_bert_inputs(self, contexts, utterances, appendix):
+        new_contexts = []
+        for context in contexts:
+            new_contexts.append("[SEP]".join(context))
+        context_data = self.tokenize(new_contexts, padding="max_length", max_length=self.max_ctx_len, truncation=True)
+        utterance_data = self.tokenize(utterances, padding="max_length", max_length=self.max_utr_len+1, truncation=True)
+        for k in utterance_data:
+            for i in range(len(contexts)):
+                utterance_data[k][i] = utterance_data[k][i][1:]  # drop [cls]
+        contexts_array = context_data["input_ids"]
+        utterances_array = utterance_data["input_ids"]
+        masks = []
+        for context_idxes, utterance_idxes in zip(contexts_array, utterances_array):
+            mask = np.outer((context_idxes != 0), (utterance_idxes != 0))
+            masks.append(mask)
+        context_tensors = {k: torch.tensor(v, dtype=torch.long, device=self.device) for k, v in context_data.items()}
+        utterance_tensors = {k: torch.tensor(v, dtype=torch.long, device=self.device) for k, v in utterance_data.items()}
+        return contexts_array, utterances_array, context_tensors, utterance_tensors, masks
 
     def _scan_twice(self, matrix):
         label_num = 1
@@ -187,9 +221,9 @@ class ModelWrapper:
         return ret_boxes
 
 
-
-def evaluate_model(model_path, tokenize, test_file, result_file, batch_size=32, device="cpu"):
-    model = ModelWrapper(model_path, tokenize, device)
+def evaluate_model(model_path, tokenize, test_file, result_file, batch_size=32, 
+        device="cpu", bert_model=False):
+    model = ModelWrapper(model_path, tokenize, device, bert_model=bert_model)
     with open(test_file, encoding="utf-8") as fi:
         samples = []
         for line in fi:
@@ -199,6 +233,7 @@ def evaluate_model(model_path, tokenize, test_file, result_file, batch_size=32, 
             utterance = raw_sample[-2]
             reference = raw_sample[-1]
             samples.append((context, utterance, reference))
+        samples = samples[:20]
 
     with open(result_file, "w", encoding="utf-8") as fo:
         for i in range(0, len(samples), batch_size):
@@ -235,4 +270,4 @@ def evaluate(result_file, tokenize):
     print([f"bleu{i+1}: {bleus[i]}" for i in range(4)])
     result = rouge.rouge(predict_texts, reference_texts)
     print([f"{key}: {result[key]}" for key in ["rouge_1/f_score", "rouge_2/f_score", "rouge_l/f_score"]])
-    print(f"em: {em / n}")
+    print(f"em: {em / n}") 

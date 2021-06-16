@@ -4,7 +4,7 @@ import numpy as np
 
 
 class RewritterDataset(Dataset):
-    def __init__(self, file_path):
+    def __init__(self, file_path, bert_dataset=False):
         super().__init__()
         self.max_context_len = None
         self.max_utterance_len = None
@@ -13,12 +13,23 @@ class RewritterDataset(Dataset):
             for line in fi:
                 sample = json.loads(line)
                 if self.max_context_len is None:
-                    self.max_context_len = len(sample["context"])
-                if self.max_utterance_len is None:
-                    self.max_utterance_len = len(sample["utterance"])
+                    if not bert_dataset:
+                        self.max_context_len = len(sample["context"])
+                        self.max_utterance_len = len(sample["utterance"])
+                    else:
+                        self.max_context_len = len(sample["context"]["input_ids"])
+                        self.max_utterance_len = len(sample["utterance"]["input_ids"])
                 del(sample["raw_sample"])
-                sample["context"] = np.array(sample["context"], dtype=np.int64)
-                sample["utterance"] = np.array(sample["utterance"], dtype=np.int64)
+                if not bert_dataset:
+                    sample["context"] = np.array(sample["context"], dtype=np.int64)
+                    sample["utterance"] = np.array(sample["utterance"], dtype=np.int64)
+                else:
+                    context = sample["context"] 
+                    context = {k: np.array(context[k], dtype=np.int64) for k in context}
+                    sample["context"] = context
+                    utterance = sample["utterance"]
+                    utterance = {k: np.array(utterance[k], dtype=np.int64) for k in utterance}
+                    sample["utterance"] = utterance
                 sample["labels"] = np.array(sample["labels"], dtype=np.int64)
                 self.samples.append(sample)
 

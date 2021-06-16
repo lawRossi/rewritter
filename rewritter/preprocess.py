@@ -302,7 +302,7 @@ def permute_tokens(tokens_list):
 
 
 def convert_dataset(data_file, save_dir, tokenize, min_tf=1, max_ctx_len=80, 
-        max_cur_len=30, sep="\t\t", bert=False, test_size=0.1, appendix=""):
+        max_utr_len=30, sep="\t\t", test_size=0.1, appendix=""):
     with open(data_file, encoding="utf-8") as fi:
         data = []
         for line in fi:
@@ -319,7 +319,7 @@ def convert_dataset(data_file, save_dir, tokenize, min_tf=1, max_ctx_len=80,
     n = 0
     with open(os.path.join(save_dir, "train.json"), "w", encoding="utf-8") as fo:
         for sample, tokenized_sample in zip(data[:num_train], tokenized_data[:num_train]):
-            result = convert_sample(sample, tokenized_sample, vocab, max_ctx_len, max_cur_len)
+            result = convert_sample(sample, tokenized_sample, vocab, max_ctx_len, max_utr_len)
             if result:
                 n += 1
                 fo.write(json.dumps(result) + "\n")
@@ -327,7 +327,7 @@ def convert_dataset(data_file, save_dir, tokenize, min_tf=1, max_ctx_len=80,
     n = 0
     with open(os.path.join(save_dir, "test.json"), "w", encoding="utf-8") as fo:
         for sample, tokenized_sample in zip(data[num_train:], tokenized_data[num_train:]):
-            result = convert_sample(sample, tokenized_sample, vocab, max_ctx_len, max_cur_len)
+            result = convert_sample(sample, tokenized_sample, vocab, max_ctx_len, max_utr_len)
             if result:
                 n += 1
                 fo.write(json.dumps(result) + "\n")
@@ -341,7 +341,7 @@ def tokenize_and_build_vocabulary(data, tokenize, min_tf, appendix):
         tokenized_sample = []
         for text in sample:
             tokens = tokenize(text)
-            tokens.append("<SEP>")
+            tokens.append("[SEP]")
             for token in tokens:
                 counts[token] += 1
             tokenized_sample.append(tokens)
@@ -354,13 +354,13 @@ def tokenize_and_build_vocabulary(data, tokenize, min_tf, appendix):
     return tokenized_data, vocab
 
 
-def convert_sample(sample, tokenized_sample,  vocab, max_ctx_len, max_cur_len):
+def convert_sample(sample, tokenized_sample,  vocab, max_ctx_len, max_utr_len):
     context = list(chain.from_iterable(sample[:2]))
     context = [vocab.get(token, vocab["<UNK>"]) for token in context]
     context = context[-max_ctx_len:]
     utterance = tokenized_sample[-2]
     utterance = [vocab.get(token, vocab["<UNK>"]) for token in utterance]
-    utterance = utterance[-max_cur_len:]
+    utterance = utterance[-max_utr_len:]
     reference = tokenized_sample[-1]
     reference = [vocab.get(token, vocab["<UNK>"]) for token in reference]
     context_labels, utterance_labels = auto_label(context, utterance[:-1], reference[:-1])
@@ -371,11 +371,70 @@ def convert_sample(sample, tokenized_sample,  vocab, max_ctx_len, max_cur_len):
         return {}
     matrix = matrix + [[-1] * len(utterance) for _ in range(max_ctx_len - len(context))]
     for i in range(len(matrix)):
-        matrix[i] += [-1] * (max_cur_len - len(utterance))
+        matrix[i] += [-1] * (max_utr_len - len(utterance))
     context += [0] * (max_ctx_len - len(context))
-    utterance += [0] * (max_cur_len - len(utterance))
+    utterance += [0] * (max_utr_len - len(utterance))
     labels = list(chain.from_iterable(matrix))
     return {"context": context, "utterance": utterance, "labels": labels, "raw_sample": sample}
+
+
+def convert_bert_dataset(data_file, save_dir, tokenize, max_ctx_len=80, 
+        max_utr_len=30, sep="\t\t", test_size=0.1, appendix=""):
+    with open(data_file, encoding="utf-8") as fi:
+        data = []
+        tokenized_data = []
+        for line in fi:
+            splits = line.strip().split(sep)
+            data.append(splits)
+            tokenized_data.append(tokenize_sample(tokenize, splits, max_ctx_len, max_utr_len))
+    num_train = int((1 - test_size) * len(data))
+    n = 0
+    with open(os.path.join(save_dir, "train.json"), "w", encoding="utf-8") as fo:
+        for sample, tokenized_sample in zip(data[:num_train], tokenized_data[:num_train]):
+            result = convert_bert_sample(sample, tokenized_sample, max_ctx_len, max_utr_len)
+            if result:
+                n += 1
+                fo.write(json.dumps(result) + "\n")
+    print(n)
+    n = 0
+    with open(os.path.join(save_dir, "test.json"), "w", encoding="utf-8") as fo:
+        for sample, tokenized_sample in zip(data[num_train:], tokenized_data[num_train:]):
+            result = convert_bert_sample(sample, tokenized_sample, max_ctx_len, max_utr_len)
+            if result:
+                n += 1
+                fo.write(json.dumps(result) + "\n")
+    print(n)
+
+
+def tokenize_sample(tokenize, sample, max_ctx_len, max_utr_len):
+    context = "[SEP]".join(sample[:-2])
+    utterance = sample[-2]
+    reference = sample[-1]
+    context = tokenize(context, max_length=max_ctx_len, truncation=True)
+    utterance = tokenize(utterance, max_length=max_utr_len, truncation=True)
+    utterance = {k: utterance[k][1:] for k in utterance}  # drop [cls]
+    reference = tokenize(reference)
+    reference = {k: reference[k][1:] for k in reference} # drop [cls]
+    return context, utterance, reference
+
+
+def convert_bert_sample(sample, tokenized_sample, max_ctx_len, max_utr_len):
+    context, utterance, reference = tokenized_sample
+    context_labels, utterance_labels = auto_label(context["input_ids"], utterance["input_ids"][:-1], reference["input_ids"][:-1])
+    matrix = make_edit_matrix(context_labels, utterance_labels)
+    operations = get_operations(context["input_ids"], matrix)
+    targets = translate(utterance["input_ids"], operations)
+    if reference["input_ids"] != targets[0]:
+        return {}
+    ctx_len = len(context["input_ids"])
+    utr_len = len(utterance["input_ids"])
+    matrix = matrix + [[-1] * utr_len for _ in range(max_ctx_len - ctx_len)]
+    for i in range(len(matrix)):
+        matrix[i] += [-1] * (max_utr_len - utr_len)
+    context = {k: context[k] + [0] * (max_ctx_len - ctx_len) for k in context}
+    utterance = {k: utterance[k] + [0] * (max_utr_len - utr_len) for k in utterance}
+    labels = list(chain.from_iterable(matrix))
+    return {"context": context, "utterance": utterance, "labels": labels, "raw_sample": sample}    
 
 
 if __name__ == "__main__":
