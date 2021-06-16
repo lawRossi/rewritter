@@ -233,7 +233,6 @@ def evaluate_model(model_path, tokenize, test_file, result_file, batch_size=32,
             utterance = raw_sample[-2]
             reference = raw_sample[-1]
             samples.append((context, utterance, reference))
-        samples = samples[:20]
 
     with open(result_file, "w", encoding="utf-8") as fo:
         for i in range(0, len(samples), batch_size):
