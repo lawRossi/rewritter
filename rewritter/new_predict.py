@@ -91,7 +91,7 @@ class ModelWrapper:
         operations2 = get_operations(contexts, matrix)
     
         return operations1 + operations2
-    
+
     def _tokens2text(self, tokens):
         prev_is_not_chinese = False
         text = ""
@@ -156,7 +156,7 @@ class ModelWrapper:
         utterances_array = utterance_data["input_ids"]
         masks = []
         for context_idxes, utterance_idxes in zip(contexts_array, utterances_array):
-            mask = np.outer((context_idxes != 0), (utterance_idxes != 0))
+            mask = np.outer((np.array(context_idxes) != 0), (np.array(utterance_idxes) != 0))
             masks.append(mask)
         context_tensors = {k: torch.tensor(v, dtype=torch.long, device=self.device) for k, v in context_data.items()}
         utterance_tensors = {k: torch.tensor(v, dtype=torch.long, device=self.device) for k, v in utterance_data.items()}
@@ -223,7 +223,7 @@ class ModelWrapper:
 
 def evaluate_model(model_path, tokenize, test_file, result_file, batch_size=32, 
         device="cpu", bert_model=False):
-    model = ModelWrapper(model_path, tokenize, device, bert_model=bert_model)
+    model = ModelWrapper(model_path, tokenize, device=device, bert_model=bert_model)
     with open(test_file, encoding="utf-8") as fi:
         samples = []
         for line in fi:
@@ -269,4 +269,4 @@ def evaluate(result_file, tokenize):
     print([f"bleu{i+1}: {bleus[i]}" for i in range(4)])
     result = rouge.rouge(predict_texts, reference_texts)
     print([f"{key}: {result[key]}" for key in ["rouge_1/f_score", "rouge_2/f_score", "rouge_l/f_score"]])
-    print(f"em: {em / n}") 
+    print(f"em: {em / n}")
