@@ -239,7 +239,7 @@ def evaluate_model(model_path, tokenize, test_file, result_file, batch_size=32,
             batch_contexts = [sample[0] for sample in samples[i:i+batch_size]]
             batch_utterances = [sample[1] for sample in samples[i:i+batch_size]]
             batch_references = [sample[2] for sample in samples[i:i+batch_size]]
-            texts = model.predict(batch_contexts, batch_utterances, method="refined")
+            texts = model.predict(batch_contexts, batch_utterances)
             for text, reference in zip(texts, batch_references):
                 fo.write(text[0] + "\t" + reference + "\n")
     evaluate(result_file, tokenize)    
