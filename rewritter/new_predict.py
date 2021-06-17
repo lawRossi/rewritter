@@ -29,7 +29,7 @@ class ModelWrapper:
         self.device = device
         self.bert_model = bert_model
 
-    def predict(self, contexts, utterances, method="original", appendix=""):
+    def predict(self, contexts, utterances, appendix=""):
         if not self.bert_model:
             contexts_array, utterances_array, contexts_tensor, utterances_tensor, masks = self._convert_inputs(contexts, utterances, appendix)
         else:
@@ -41,10 +41,7 @@ class ModelWrapper:
         predicted_texts = []
         for i, matrix in enumerate(matrixes):
             matrix = matrix * masks[i]
-            if method == "original":
-                operations = self._derive_operations_(contexts_array[i], matrix)
-            else:
-                operations = self._derive_operations(contexts_array[i], matrix)
+            operations = self._derive_operations(contexts_array[i], matrix)
             translations = translate(utterances_array[i], operations)
             translation_texts = []
             for translation in translations:
@@ -72,25 +69,6 @@ class ModelWrapper:
             matrix[y1:y2, x1:x2] = label
         operations = get_operations(contexts, matrix)
         return operations
-
-    def _derive_operations_(self, contexts, matrix):
-        connect_matrix = np.where(matrix == 1, 1, 0)
-        boxes = self._scan_twice(connect_matrix)
-        for box in boxes:
-            x1, x2 = box[0]
-            y1, y2 = box[1]
-            matrix[y1:y2, x1:x2] = 1
-        operations1 = get_operations(contexts, matrix)
-
-        connect_matrix = np.where(matrix == 2, 1, 0)
-        boxes = self._scan_twice(connect_matrix)
-        for box in boxes:
-            x1, x2 = box[0]
-            y1, y2 = box[1]
-            matrix[y1:y2, x1:x2] = 2
-        operations2 = get_operations(contexts, matrix)
-    
-        return operations1 + operations2
 
     def _tokens2text(self, tokens):
         prev_is_not_chinese = False
